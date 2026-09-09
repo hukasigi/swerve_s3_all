@@ -8,6 +8,36 @@ struct PidParam {
         double i_gain;
         double d_gain;
 };
+struct Position_rad {
+        double x;
+        double y;
+        double rad;
+
+        Position_rad() : x(0.0), y(0.0), rad(0.0) {}
+        Position_rad(double x_, double y_, double yaw_) : x(x_), y(y_), rad(yaw_) {}
+};
+
+struct Position_deg {
+        double x;
+        double y;
+        double deg;
+
+        Position_deg() : x(0.0), y(0.0), deg(0.0) {}
+        Position_deg(double x_, double y_, double yaw_) : x(x_), y(y_), deg(yaw_) {}
+};
+
+struct ModulePosition {
+        double x_mm;
+        double y_mm;
+};
+
+// TODO:実機の車輪位置に合わせて変更してください
+// x: 前後方向、y: 左右方向
+const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
+    {0,        390.06 }, // module 1
+    {-337.802, -195.03}, // module 2
+    {337.802,  -195.03}, // module 3
+};
 
 using pin_t = uint8_t;
 using ch_t  = uint8_t;
@@ -124,5 +154,3 @@ constexpr double POSITION_TOLERANCE_MM = 10.0;
 constexpr double YAW_TOLERANCE_RAD     = 5.0 * M_PI / 180.0;
 
 const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行わない
-
-constexpr double YAW_RANGE_DEG = 360.;

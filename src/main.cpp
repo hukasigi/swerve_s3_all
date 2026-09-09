@@ -6,6 +6,7 @@
 #include "nnct/interfaces/interfaces.hpp"
 #include "swerve_drive.hpp"
 #include "trapezoid.h"
+#include "utility.h"
 #include <Arduino.h>
 #include <peer_link.h>
 
@@ -31,29 +32,8 @@ unsigned long last = micros();
 Position_deg now_pos_deg;
 Position_deg target_pos;
 
-std::vector<uint8_t> positionToPayload(const Position_deg& position) {
-    const int16_t values[3] = {
-        static_cast<int16_t>(position.x),
-        static_cast<int16_t>(position.y),
-        static_cast<int16_t>(position.deg),
-    };
+volatile uint32_t last_target_received_ms = 0;
 
-    std::vector<uint8_t> payload(6);
-
-    for (int i = 0; i < 3; ++i) {
-        const uint16_t value = static_cast<uint16_t>(values[i]);
-        payload[i * 2]       = static_cast<uint8_t>(value & 0xFF);
-        payload[i * 2 + 1]   = static_cast<uint8_t>((value >> 8) & 0xFF);
-    }
-
-    return payload;
-}
-
-int16_t readInt16(const std::vector<uint8_t>& data, size_t index) {
-    uint16_t value = static_cast<uint16_t>(data[index]) | (static_cast<uint16_t>(data[index + 1]) << 8);
-
-    return static_cast<int16_t>(value);
-}
 void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message>& messages) {
 
     for (const Message& message : messages) {
@@ -66,13 +46,10 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message
             continue;
         }
 
-        target_x   = readInt16(message.data, 0);
-        target_y   = readInt16(message.data, 2);
-        target_deg = readInt16(message.data, 4);
-
-        target_pos.x   = (double)target_x;
-        target_pos.y   = (double)target_y;
-        target_pos.deg = (double)target_deg;
+        target_pos.x            = (double)readInt16(message.data, 0);
+        target_pos.y            = (double)readInt16(message.data, 2);
+        target_pos.deg          = (double)readInt16(message.data, 4);
+        last_target_received_ms = millis();
     }
 }
 
@@ -136,21 +113,12 @@ void stop_swerve_drives() {
     for (size_t i = 0; i < NUM_SWERVE_MODULES; ++i) {
         swerve_drives[i]->stop_drive();
     }
+    steering_1.set_target(90);
+    steering_2.set_target(210);
+    steering_3.set_target(330);
+
     drive_pid_reset();
 }
-
-struct ModulePosition {
-        double x_mm;
-        double y_mm;
-};
-
-// 実機の車輪位置に合わせて変更してください
-// x: 前後方向、y: 左右方向
-const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
-    {0,        390.06 }, // module 1
-    {-337.802, -195.03}, // module 2
-    {337.802,  -195.03}, // module 3
-};
 
 void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
 
@@ -298,6 +266,15 @@ void loop() {
 
     double dt = (now - last) * 1.e-6;
     last      = now;
+
+    if (millis() - last_target_received_ms > 500) {
+        x_ref_speed   = 0.0;
+        y_ref_speed   = 0.0;
+        deg_ref_speed = 0.0;
+        stop_swerve_drives();
+        return;
+    }
+
     odometry.update(dt);
 
     now_pos_deg = odometry.get_position_deg();
@@ -331,13 +308,6 @@ void loop() {
     int16_t y_vec   = y_ref_speed;
     int16_t deg_vec = deg_ref_speed;
 
-    // if (!PS4.isConnected()) {
-    //     stop_swerve_drives();
-    //     Serial.println("PS4 not connected");
-    //     delay(100);
-    //     return;
-    // }
-
     // int     rx     = PS4.RStickX();
     // int     ry     = PS4.RStickY();
     // uint8_t r2_val = PS4.R2Value();
@@ -345,7 +315,6 @@ void loop() {
 
     // handle_controller_input_deg_vec(rx, ry, r2_val);
     // handle_controller_input(rx, ry, l2_val, r2_val);
-
     set_robot_velocity(x_vec, y_vec, deg_vec);
     // set_robot_velocity(1000, 0, 0);
 

@@ -5,24 +5,6 @@
 #include "constants.hpp"
 #include "nnct/interfaces/incremental_encoder.hpp"
 
-struct Position_rad {
-        double x;
-        double y;
-        double rad;
-
-        Position_rad() : x(0.0), y(0.0), rad(0.0) {}
-        Position_rad(double x_, double y_, double yaw_) : x(x_), y(y_), rad(yaw_) {}
-};
-
-struct Position_deg {
-        double x;
-        double y;
-        double deg;
-
-        Position_deg() : x(0.0), y(0.0), deg(0.0) {}
-        Position_deg(double x_, double y_, double yaw_) : x(x_), y(y_), deg(yaw_) {}
-};
-
 class Odometry {
     public:
         Odometry(nnct::interfaces::IncrementalEncoder& encoder1, nnct::interfaces::IncrementalEncoder& encoder2,
