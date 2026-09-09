@@ -142,6 +142,8 @@ class SwerveDrive {
             drive->set_target_mm_s(drive_target_mm_s * params.drive_dir);
         }
 
+        void set_drive_target_mm_s(double speed_mm_s) { drive->set_target_mm_s(speed_mm_s); }
+
         void stop_drive() { drive->stop(); }
         void update(double dt) {
             this->steering->update(dt);

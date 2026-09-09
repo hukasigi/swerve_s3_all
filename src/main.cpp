@@ -34,25 +34,6 @@ Position_deg target_pos;
 
 volatile uint32_t last_target_received_ms = 0;
 
-void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message>& messages) {
-
-    for (const Message& message : messages) {
-        if (message.type != POSITION_MESSAGE_TYPE) {
-            continue;
-        }
-
-        if (message.data.size() < 6) {
-            Serial.println("invalid target data");
-            continue;
-        }
-
-        target_pos.x            = (double)readInt16(message.data, 0);
-        target_pos.y            = (double)readInt16(message.data, 2);
-        target_pos.deg          = (double)readInt16(message.data, 4);
-        last_target_received_ms = millis();
-    }
-}
-
 TaskHandle_t control_loop_task_handle;
 
 Motor          steering_motor_1(STEERING_MOTOR_DIR_1, STEERING_MOTOR_PWM_1);
@@ -96,28 +77,40 @@ SwerveDrive swerve_drive_1(&drive_1, &steering_1, 1);
 SwerveDrive swerve_drive_2(&drive_2, &steering_2, 2);
 SwerveDrive swerve_drive_3(&drive_3, &steering_3, 3);
 
-SwerveDrive*     swerve_drives[]    = {&swerve_drive_1, &swerve_drive_2, &swerve_drive_3};
-constexpr size_t NUM_SWERVE_MODULES = 3;
+SwerveDrive* swerve_drives[] = {&swerve_drive_1, &swerve_drive_2, &swerve_drive_3};
+Steering*    steerings[]{&steering_1, &steering_2, &steering_3};
 
 double x_ref_speed   = 0.0;
 double y_ref_speed   = 0.0;
 double deg_ref_speed = 0.0;
+
+bool stop_requested           = false;
+bool outward_steering_applied = false;
 
 void drive_pid_reset() {
     drive_pid_1.reset();
     drive_pid_2.reset();
     drive_pid_3.reset();
 }
-
-void stop_swerve_drives() {
+void set_outward_steering_targets() {
     for (size_t i = 0; i < NUM_SWERVE_MODULES; ++i) {
-        swerve_drives[i]->stop_drive();
+        const double outward_angle = atan2(MODULE_POSITIONS[i].y_mm, MODULE_POSITIONS[i].x_mm) * 180.0 / M_PI;
+        steerings[i]->set_target(outward_angle);
     }
-    steering_1.set_target(90);
-    steering_2.set_target(210);
-    steering_3.set_target(330);
+}
 
-    drive_pid_reset();
+void update_stop_steering(const Position_deg& velocity) {
+    if (!stop_requested || outward_steering_applied) {
+        return;
+    }
+
+    const bool stopped =
+        hypot(velocity.x, velocity.y) < STOP_VELOCITY_THRESHOLD_MM_S && fabs(velocity.deg) < STOP_ANGULAR_THRESHOLD_DEG_S;
+
+    if (stopped) {
+        set_outward_steering_targets();
+        outward_steering_applied = true;
+    }
 }
 
 void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
@@ -131,6 +124,25 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
     if (fabs(omega_deg_s) < ROTATION_DEADZONE_DEG_S) {
         omega_deg_s = 0.0;
     }
+
+    const bool zero_command = vx_mm_s == 0.0 && vy_mm_s == 0.0 && omega_deg_s == 0.0;
+
+    if (zero_command) {
+        if (!stop_requested) {
+            stop_requested           = true;
+            outward_steering_applied = false;
+        }
+
+        // ステア角を変更せず、ドライブ速度だけ0にする
+        for (size_t i = 0; i < NUM_SWERVE_MODULES; ++i) {
+            swerve_drives[i]->set_drive_target_mm_s(0.0);
+        }
+
+        return;
+    }
+
+    stop_requested           = false;
+    outward_steering_applied = false;
 
     const double omega_rad_s = omega_deg_s * M_PI / 180.0;
 
@@ -147,15 +159,9 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
         const double wheel_vy = vy_mm_s + omega_rad_s * x;
 
         wheel_speed[i] = hypot(wheel_vx, wheel_vy);
+        wheel_angle[i] = atan2(wheel_vy, wheel_vx) * 180.0 / M_PI;
 
-        if (!(vx_mm_s == 0.0 && vy_mm_s == 0.0 && omega_deg_s == 0.0)) {
-            wheel_angle[i] = atan2(wheel_vy, wheel_vx) * 180.0 / M_PI;
-        }
-
-        // 車輪で一番早いものを探す
-        if (wheel_speed[i] > max_speed) {
-            max_speed = wheel_speed[i];
-        }
+        max_speed = max(max_speed, wheel_speed[i]);
     }
 
     // 最大速度を超えないように全輪を同じ比率でスケーリング
@@ -172,7 +178,7 @@ void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) 
     double magnitude = hypot((double)x_vec, (double)y_vec);
 
     if (magnitude <= MAGNITUDE_DEADZONE) {
-        stop_swerve_drives();
+        set_robot_velocity(0.0, 0.0, 0.0);
         return;
     }
 
@@ -238,6 +244,25 @@ bool initialize_swerve_drives() {
     return true;
 }
 
+void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message>& messages) {
+
+    for (const Message& message : messages) {
+        if (message.type != POSITION_MESSAGE_TYPE) {
+            continue;
+        }
+
+        if (message.data.size() < 6) {
+            Serial.println("invalid target data");
+            continue;
+        }
+
+        target_pos.x            = (double)readInt16(message.data, 0);
+        target_pos.y            = (double)readInt16(message.data, 2);
+        target_pos.deg          = (double)readInt16(message.data, 4);
+        last_target_received_ms = millis();
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     odometry.begin();
@@ -267,17 +292,18 @@ void loop() {
     double dt = (now - last) * 1.e-6;
     last      = now;
 
-    if (millis() - last_target_received_ms > 500) {
-        x_ref_speed   = 0.0;
-        y_ref_speed   = 0.0;
-        deg_ref_speed = 0.0;
-        stop_swerve_drives();
-        return;
-    }
-
     odometry.update(dt);
 
     now_pos_deg = odometry.get_position_deg();
+
+    const bool target_timeout = millis() - last_target_received_ms > 500;
+
+    if (target_timeout) {
+        target_pos    = now_pos_deg;
+        x_ref_speed   = 0.0;
+        y_ref_speed   = 0.0;
+        deg_ref_speed = 0.0;
+    }
 
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
         Message message;
@@ -316,6 +342,7 @@ void loop() {
     // handle_controller_input_deg_vec(rx, ry, r2_val);
     // handle_controller_input(rx, ry, l2_val, r2_val);
     set_robot_velocity(x_vec, y_vec, deg_vec);
+    update_stop_steering(now_velocity);
     // set_robot_velocity(1000, 0, 0);
 
     // static uint32_t last_print_time = 0;

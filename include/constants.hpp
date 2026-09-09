@@ -31,14 +31,6 @@ struct ModulePosition {
         double y_mm;
 };
 
-// TODO:実機の車輪位置に合わせて変更してください
-// x: 前後方向、y: 左右方向
-const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
-    {0,        390.06 }, // module 1
-    {-337.802, -195.03}, // module 2
-    {337.802,  -195.03}, // module 3
-};
-
 using pin_t = uint8_t;
 using ch_t  = uint8_t;
 
@@ -71,6 +63,8 @@ const double OFFSET_DEG_3              = 285.;
 
 const pin_t CAN_RX_PIN = 4; // 実際の配線に合わせて変更
 const pin_t CAN_TX_PIN = 5; // 実際の配線に合わせて変更
+
+constexpr size_t NUM_SWERVE_MODULES = 3;
 
 // ステア制御パラメータ
 const int16_t STEER_MOTOR_POWER_LIMIT = 255;
@@ -122,6 +116,9 @@ constexpr double MAX_ROTATE_SPEED_DEG_S = 300.0;
 constexpr double MAX_SHIFT_ACCELERATION  = 1000.;
 constexpr double MAX_ROTATE_ACCELERATION = 300.;
 
+constexpr double STOP_VELOCITY_THRESHOLD_MM_S = 5.0;
+constexpr double STOP_ANGULAR_THRESHOLD_DEG_S = 1.0;
+
 // オドメトリ
 
 const pin_t ENCODER_A_1 = 27;
@@ -154,3 +151,11 @@ constexpr double POSITION_TOLERANCE_MM = 10.0;
 constexpr double YAW_TOLERANCE_RAD     = 5.0 * M_PI / 180.0;
 
 const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行わない
+
+// TODO:実機の車輪位置に合わせて変更してください
+// x: 前後方向、y: 左右方向
+const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
+    {0,        390.06 }, // module 1
+    {-337.802, -195.03}, // module 2
+    {337.802,  -195.03}, // module 3
+};
