@@ -51,7 +51,7 @@ RobomasMotor drive_motor_2(DRIVE_MOTOR_ID_2);
 RobomasMotor drive_motor_3(DRIVE_MOTOR_ID_3);
 
 target_vec_data target_data;
-CAN             can(CAN_RX_PIN, CAN_TX_PIN);
+CAN             can(CAN_CS_PIN, -1, &SPI);
 
 PID drive_pid_1(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
                 DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
@@ -260,6 +260,8 @@ void control_loop_task(void* args) {
 
     while (true) {
         double dt = CONTROL_CYCLE_MS * 1.e-3;
+
+        can.update();
 
         TargetCommand command;
 

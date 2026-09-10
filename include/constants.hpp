@@ -61,8 +61,7 @@ const pin_t  STEERING_ABS_ENCODER_CS_3 = 32;
 const pin_t  STEERING_LIMIT_SW_3       = 34;
 const double OFFSET_DEG_3              = 285.;
 
-const pin_t CAN_RX_PIN = 4; // 実際の配線に合わせて変更
-const pin_t CAN_TX_PIN = 5; // 実際の配線に合わせて変更
+const pin_t CAN_CS_PIN = 4; // 実際の配線に合わせて変更
 
 constexpr size_t NUM_SWERVE_MODULES = 3;
 
