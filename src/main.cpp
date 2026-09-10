@@ -23,16 +23,8 @@ const peer_id_t   FROM_PEER_ID          = 0x11;
 const peer_id_t   TO_PEER_ID            = 0x12;
 constexpr uint8_t POSITION_MESSAGE_TYPE = 0x01;
 
-int16_t target_x   = 0;
-int16_t target_y   = 0;
-int16_t target_deg = 0;
-
-unsigned long last = micros();
-
 Position_deg now_pos_deg;
 Position_deg target_pos;
-
-volatile uint32_t last_target_received_ms = 0;
 
 TaskHandle_t control_loop_task_handle;
 
@@ -78,7 +70,13 @@ SwerveDrive swerve_drive_2(&drive_2, &steering_2, 2);
 SwerveDrive swerve_drive_3(&drive_3, &steering_3, 3);
 
 SwerveDrive* swerve_drives[] = {&swerve_drive_1, &swerve_drive_2, &swerve_drive_3};
-Steering*    steerings[]{&steering_1, &steering_2, &steering_3};
+
+struct TargetCommand {
+        Position_deg position;
+        uint32_t     received_ms;
+};
+
+QueueHandle_t target_queue;
 
 double x_ref_speed   = 0.0;
 double y_ref_speed   = 0.0;
@@ -86,6 +84,8 @@ double deg_ref_speed = 0.0;
 
 bool stop_requested           = false;
 bool outward_steering_applied = false;
+
+portMUX_TYPE position_mux = portMUX_INITIALIZER_UNLOCKED;
 
 void drive_pid_reset() {
     drive_pid_1.reset();
@@ -95,7 +95,7 @@ void drive_pid_reset() {
 void set_outward_steering_targets() {
     for (size_t i = 0; i < NUM_SWERVE_MODULES; ++i) {
         const double outward_angle = atan2(MODULE_POSITIONS[i].y_mm, MODULE_POSITIONS[i].x_mm) * 180.0 / M_PI;
-        steerings[i]->set_target(outward_angle);
+        swerve_drives[i]->set_steer_angle(outward_angle);
     }
 }
 
@@ -191,20 +191,16 @@ void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) 
 }
 
 void handle_controller_input(int x_vec, int y_vec, uint8_t l2_value, uint8_t r2_value) {
-    constexpr double MAX_TRANSLATION_SPEED_MM_S = WHEEL_MAX_SPEED_MM_S;
-    constexpr double MAX_ROTATION_SPEED_DEG_S   = MAX_ROTATE_SPEED_DEG_S;
-
     constexpr double STICK_MAX   = 127.0;
     constexpr double TRIGGER_MAX = 255.0;
 
     // 右スティック：並進
-    const double vx = static_cast<double>(x_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
-    const double vy = static_cast<double>(y_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
+    const double vx = static_cast<double>(x_vec) / STICK_MAX * SHIFT_MAX_SPEED_MM_S;
+    const double vy = static_cast<double>(y_vec) / STICK_MAX * SHIFT_MAX_SPEED_MM_S;
 
     // R2 - L2：旋回
     // 符号が逆なら l2_value と r2_value を入れ替える
-    const double omega =
-        (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATION_SPEED_DEG_S;
+    const double omega = (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATE_SPEED_DEG_S;
 
     set_robot_velocity(vx, vy, omega);
 }
@@ -219,18 +215,6 @@ void can_send() {
     // ドライブモータの指令値を CAN で送信
     if (!can.send(&drive_motor_1, &drive_motor_2, 0, &drive_motor_3)) {
         Serial.println("Drive CAN send failed");
-    }
-}
-
-void control_loop_task(void* args) {
-    TickType_t wake_time = xTaskGetTickCount();
-
-    while (true) {
-        update_swerve_drives();
-
-        can_send();
-
-        vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
 }
 
@@ -256,15 +240,81 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message
             continue;
         }
 
-        target_pos.x            = (double)readInt16(message.data, 0);
-        target_pos.y            = (double)readInt16(message.data, 2);
-        target_pos.deg          = (double)readInt16(message.data, 4);
-        last_target_received_ms = millis();
+        TargetCommand command{
+            .position =
+                {
+                           static_cast<double>(readInt16(message.data, 0)),
+                           static_cast<double>(readInt16(message.data, 2)),
+                           static_cast<double>(readInt16(message.data, 4)),
+                           },
+            .received_ms = millis(),
+        };
+
+        xQueueOverwrite(target_queue, &command);
+    }
+}
+
+void control_loop_task(void* args) {
+    TickType_t wake_time               = xTaskGetTickCount();
+    uint32_t   last_target_received_ms = 0;
+
+    while (true) {
+        double dt = CONTROL_CYCLE_MS * 1.e-3;
+
+        TargetCommand command;
+
+        if (xQueueReceive(target_queue, &command, 0) == pdTRUE) {
+            target_pos              = command.position;
+            last_target_received_ms = command.received_ms;
+        }
+
+        odometry.update(dt);
+
+        Position_deg position = odometry.get_position_deg();
+
+        portENTER_CRITICAL(&position_mux);
+        now_pos_deg = position;
+        portEXIT_CRITICAL(&position_mux);
+
+        x_ref_speed =
+            updateVelocityProfile(target_pos.x, now_pos_deg.x, x_ref_speed, SHIFT_MAX_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+
+        y_ref_speed =
+            updateVelocityProfile(target_pos.y, now_pos_deg.y, y_ref_speed, SHIFT_MAX_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+
+        deg_ref_speed = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, deg_ref_speed, MAX_ROTATE_SPEED_DEG_S,
+                                                   MAX_ROTATE_ACCELERATION, dt);
+
+        Position_deg now_velocity = odometry.get_velocity_deg();
+
+        const bool target_timeout = millis() - last_target_received_ms > 500;
+        if (target_timeout) {
+            target_pos    = now_pos_deg;
+            x_ref_speed   = 0.0;
+            y_ref_speed   = 0.0;
+            deg_ref_speed = 0.0;
+        }
+
+        set_robot_velocity(x_ref_speed, y_ref_speed, deg_ref_speed);
+        update_stop_steering(now_velocity);
+
+        update_swerve_drives();
+        can_send();
+
+        vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
 }
 
 void setup() {
     Serial.begin(115200);
+    target_queue = xQueueCreate(1, sizeof(TargetCommand));
+
+    if (target_queue == nullptr) {
+        Serial.println("target queue creation failed");
+        while (true) {
+            delay(1000);
+        }
+    }
     odometry.begin();
     SPI.begin();
 
@@ -287,28 +337,17 @@ void setup() {
 }
 
 void loop() {
-    unsigned long now = micros();
-
-    double dt = (now - last) * 1.e-6;
-    last      = now;
-
-    odometry.update(dt);
-
-    now_pos_deg = odometry.get_position_deg();
-
-    const bool target_timeout = millis() - last_target_received_ms > 500;
-
-    if (target_timeout) {
-        target_pos    = now_pos_deg;
-        x_ref_speed   = 0.0;
-        y_ref_speed   = 0.0;
-        deg_ref_speed = 0.0;
-    }
 
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
         Message message;
         message.type = POSITION_MESSAGE_TYPE;
-        message.data = positionToPayload(now_pos_deg);
+        Position_deg position_snapshot;
+
+        portENTER_CRITICAL(&position_mux);
+        position_snapshot = now_pos_deg;
+        portEXIT_CRITICAL(&position_mux);
+
+        message.data = positionToPayload(position_snapshot);
 
         std::vector<Message> messages{message};
 
@@ -318,41 +357,6 @@ void loop() {
             Serial.printf("send error: %d\n", result);
         }
     }
-
-    x_ref_speed =
-        updateVelocityProfile(target_pos.x, now_pos_deg.x, x_ref_speed, SHIFT_MAX_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
-
-    y_ref_speed =
-        updateVelocityProfile(target_pos.y, now_pos_deg.y, y_ref_speed, SHIFT_MAX_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
-
-    deg_ref_speed = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, deg_ref_speed, MAX_ROTATE_SPEED_DEG_S,
-                                               MAX_ROTATE_ACCELERATION, dt);
-
-    Position_deg now_velocity = odometry.get_velocity_deg();
-
-    int16_t x_vec   = x_ref_speed;
-    int16_t y_vec   = y_ref_speed;
-    int16_t deg_vec = deg_ref_speed;
-
-    // int     rx     = PS4.RStickX();
-    // int     ry     = PS4.RStickY();
-    // uint8_t r2_val = PS4.R2Value();
-    // uint8_t l2_val = PS4.L2Value();
-
-    // handle_controller_input_deg_vec(rx, ry, r2_val);
-    // handle_controller_input(rx, ry, l2_val, r2_val);
-    set_robot_velocity(x_vec, y_vec, deg_vec);
-    update_stop_steering(now_velocity);
-    // set_robot_velocity(1000, 0, 0);
-
-    // static uint32_t last_print_time = 0;
-    // const uint32_t  now             = millis();
-
-    // if (now - last_print_time >= 1000) {
-    //     last_print_time = now;
-    //     Serial.printf("x:%d y:%d deg:%d receive:%d\r\n", target_data.x_mm_s, target_data.y_mm_s, target_data.theta_deg_s,
-    //                   target_data.received);
-    // }
 
     delay(LOOP_DELAY_MS);
 }

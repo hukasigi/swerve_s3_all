@@ -143,6 +143,7 @@ class SwerveDrive {
         }
 
         void set_drive_target_mm_s(double speed_mm_s) { drive->set_target_mm_s(speed_mm_s); }
+        void set_steer_angle(double target_deg) { steering->set_target(target_deg); }
 
         void stop_drive() { drive->stop(); }
         void update(double dt) {
