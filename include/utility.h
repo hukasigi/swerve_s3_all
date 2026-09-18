@@ -2,7 +2,7 @@
 
 #include "constants.hpp"
 
-std::vector<uint8_t> positionToPayload(const Position_deg& position) {
+std::vector<uint8_t> positionToPayload(const x_y_theta_deg& position) {
     const int16_t values[3] = {
         static_cast<int16_t>(position.x),
         static_cast<int16_t>(position.y),

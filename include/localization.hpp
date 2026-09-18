@@ -10,12 +10,12 @@ class Odometry {
         Odometry(nnct::interfaces::IncrementalEncoder& encoder1, nnct::interfaces::IncrementalEncoder& encoder2,
                  nnct::interfaces::IncrementalEncoder& encoder3);
 
-        void         begin();
-        Position_rad get_position_rad() const;
-        Position_rad get_velocity_rad() const;
-        Position_deg get_position_deg() const;
-        Position_deg get_velocity_deg() const;
-        void         update(double dt);
+        void          begin();
+        Position_rad  get_position_rad() const;
+        Position_rad  get_velocity_rad() const;
+        x_y_theta_deg get_position_deg() const;
+        x_y_theta_deg get_velocity_deg() const;
+        void          update(double dt);
 
     private:
         static bool Invert3x3(const double A[3][3], double invA[3][3]);
