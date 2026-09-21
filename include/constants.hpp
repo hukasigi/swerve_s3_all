@@ -111,8 +111,6 @@ static constexpr double DRIVE_GEAR_RATIO = 19.0 / 1.0; // モーター:ホイー
 
 static constexpr double STEER_GEAR_RATIO_MOTOR_TO_STEER = 65.0 / 27.0;
 
-static const int32_t CALIBRATING_DUTY = 150;
-
 // ホイール物理最大速度（実機に合わせて調整）  482rpmなので2500mm/s
 constexpr double MAX_SHIFT_SPEED_MM_S = 2000.0;
 
@@ -152,15 +150,20 @@ constexpr double GEAR_RATIO = 1.0;
 constexpr double COUNTS_PER_MM = (ENCODER_RESOLUTION * GEAR_RATIO) / (M_PI * OD_RADIUS * 2.0);
 
 // 許容誤差
-constexpr double POSITION_TOLERANCE_MM = 3.0;
-constexpr double YAW_TOLERANCE_RAD     = 2.0 * M_PI / 180.0;
+constexpr double POSITION_TOLERANCE_MM = 1.0;
+constexpr double YAW_TOLERANCE_RAD     = 0.5 * M_PI / 180.0;
 
 const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行わない
+
+constexpr double ANGLE_DEAD_ZONE_DEG = 0.1;
 
 // TODO:実機の車輪位置に合わせて変更してください
 // x: 前後方向、y: 左右方向
 const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
-    {0,        -390.06}, // module 1
-    {337.802,  195.03 }, // module 2
-    {-337.802, 195.03 }, // module 3
+    {0,        -338.623}, // module 1
+    {394.405,  344.506 }, // module 2
+    {-394.405, 344.506 }, // module 3
 };
+
+constexpr double ODO_CENTER_OFFSET_X = 0.0;
+constexpr double ODO_CENTER_OFFSET_Y = 116.796;
