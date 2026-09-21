@@ -260,7 +260,7 @@ void control_loop_task(void* args) {
         const double body_vx = c * ref_speed.x + s * ref_speed.y;
         const double body_vy = -s * ref_speed.x + c * ref_speed.y;
 
-        set_robot_velocity(body_vx, body_vy, -ref_speed.deg);
+        set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         // set_robot_velocity(target_pos.x, target_pos.y, target_pos.deg);
 
         can.update();

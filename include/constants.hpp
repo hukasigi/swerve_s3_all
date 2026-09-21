@@ -46,7 +46,7 @@ const ch_t   STEERING_MOTOR_CH_1       = 0;
 const id_t   DRIVE_MOTOR_ID_1          = 0x01; // TODO:変更
 const pin_t  STEERING_ABS_ENCODER_CS_1 = 8;
 const pin_t  STEERING_LIMIT_SW_1       = 4;
-const double OFFSET_DEG_1              = 293.41;
+const double OFFSET_DEG_1              = 294.95;
 
 // ステアリング2
 const pin_t  STEERING_MOTOR_DIR_2      = 41;
@@ -55,7 +55,7 @@ const ch_t   STEERING_MOTOR_CH_2       = 1;
 const id_t   DRIVE_MOTOR_ID_2          = 0x02;
 const pin_t  STEERING_ABS_ENCODER_CS_2 = 18;
 const pin_t  STEERING_LIMIT_SW_2       = 5;
-const double OFFSET_DEG_2              = 353.02;
+const double OFFSET_DEG_2              = 353.48;
 
 // ステアリング3
 const pin_t  STEERING_MOTOR_DIR_3      = 1;
@@ -64,7 +64,7 @@ const ch_t   STEERING_MOTOR_CH_3       = 2;
 const id_t   DRIVE_MOTOR_ID_3          = 0x04;
 const pin_t  STEERING_ABS_ENCODER_CS_3 = 17;
 const pin_t  STEERING_LIMIT_SW_3       = 6;
-const double OFFSET_DEG_3              = 38.60;
+const double OFFSET_DEG_3              = 42.75;
 
 const pin_t       CAN_CS_PIN  = 9; // 実際の配線に合わせて変更
 constexpr uint8_t CAN_INT_PIN = -1;
@@ -102,8 +102,6 @@ constexpr uint8_t  CONTROL_LOOP_TASK_PRIORITY   = 10;
 constexpr uint32_t LOOP_DELAY_MS                = 10;
 
 const uint8_t ABS_ENCODER_READ_PERIOD_MS = 2;
-
-constexpr std::array<double, 3> STEER_ZERO_ANGLE_DEG = {45.0, 165.0, 285.0}; // 各ステア原点
 
 constexpr double DRIVE_RADIUS = 50;
 
@@ -162,7 +160,7 @@ const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行
 // TODO:実機の車輪位置に合わせて変更してください
 // x: 前後方向、y: 左右方向
 const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
-    {0,        390.06 }, // module 1
-    {-337.802, -195.03}, // module 2
-    {337.802,  -195.03}, // module 3
+    {0,        -390.06}, // module 1
+    {337.802,  195.03 }, // module 2
+    {-337.802, 195.03 }, // module 3
 };

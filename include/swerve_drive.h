@@ -30,7 +30,7 @@ class Steering {
             double       duty           = pid->update(target_degree, current_degree, dt);
             const double error          = pid->getError();
 
-            constexpr double DEAD_ZONE_DEG = 1.0;
+            constexpr double DEAD_ZONE_DEG = 0.0;
             if (fabs(error) < DEAD_ZONE_DEG) {
                 duty = 0.0;
             }
