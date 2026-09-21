@@ -85,20 +85,27 @@ x_y_theta_deg Odometry::get_velocity_deg() const {
 }
 
 void Odometry::_buildInverse() {
-    const double a1 = 215.0 * M_PI / 180.0;
+    const double a1 = 240.0 * M_PI / 180.0;
     const double a2 = 0.0 * M_PI / 180.0;
-    const double a3 = 135.0 * M_PI / 180.0;
+    const double a3 = 120.0 * M_PI / 180.0;
 
     const double c1 = cos(a1), s1 = sin(a1);
     const double c2 = cos(a2), s2 = sin(a2);
     const double c3 = cos(a3), s3 = sin(a3);
 
-    const double k = +ROBOT_TO_ODO_RADIUS;
+    const double k = -ROBOT_TO_ODO_RADIUS;
+
+    constexpr double ODO_CENTER_OFFSET_X = 0.0;
+    constexpr double ODO_CENTER_OFFSET_Y = 17.320;
+
+    const double b1 = k + ODO_CENTER_OFFSET_X * s1 - ODO_CENTER_OFFSET_Y * c1;
+    const double b2 = k + ODO_CENTER_OFFSET_X * s2 - ODO_CENTER_OFFSET_Y * c2;
+    const double b3 = k + ODO_CENTER_OFFSET_X * s3 - ODO_CENTER_OFFSET_Y * c3;
 
     const double A[3][3] = {
-        {c1, s1, k},
-        {c2, s2, k},
-        {c3, s3, k},
+        {c1, s1, b1},
+        {c2, s2, b2},
+        {c3, s3, b3},
     };
 
     inv_ok_ = Invert3x3(A, invA_);
