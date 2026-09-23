@@ -3,6 +3,7 @@
 #include "Pid.h"
 #include "constants.hpp"
 #include "localization.hpp"
+#include "message.h"
 #include "nnct/interfaces/interfaces.hpp"
 #include "nnct/interfaces/spi_mutex.hpp"
 #include "peer_link.h"
@@ -66,6 +67,8 @@ Odometry odometry(enc_1, enc_2, enc_3);
 x_y_theta_deg now_pos_deg;
 x_y_theta_deg target_pos;
 x_y_theta_deg ref_speed;
+
+x_y_theta_deg now_vel_deg;
 
 constexpr uint8_t WIFI_CHANNEL          = 14;
 const peer_id_t   FROM_PEER_ID          = 0x11;
@@ -243,11 +246,21 @@ void control_loop_task(void* args) {
 
         now_pos_deg = odometry.get_position_deg();
 
-        ref_speed.x =
-            updateVelocityProfile(target_pos.x, now_pos_deg.x, ref_speed.x, MAX_SHIFT_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+        const double dx = target_pos.x - now_pos_deg.x;
+        const double dy = target_pos.y - now_pos_deg.y;
 
-        ref_speed.y =
-            updateVelocityProfile(target_pos.y, now_pos_deg.y, ref_speed.y, MAX_SHIFT_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+        const double distance = hypot(dx, dy);
+
+        const double direction_x = dx / distance;
+        const double direction_y = dy / distance;
+
+        const double current_speed = ref_speed.x * direction_x + ref_speed.y * direction_y;
+
+        const double linear_speed =
+            updateDistanceVelocityProfile(distance, current_speed, MAX_SHIFT_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+
+        ref_speed.x = direction_x * linear_speed;
+        ref_speed.y = direction_y * linear_speed;
 
         ref_speed.deg = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, ref_speed.deg, MAX_ROTATE_SPEED_DEG_S,
                                                    MAX_ROTATE_ACCELERATION, dt);

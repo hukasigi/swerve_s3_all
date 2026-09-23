@@ -159,3 +159,31 @@ double updateAngleVelocityProfile(double target_deg, double now_deg, double curr
 
     return next_speed;
 }
+
+double updateDistanceVelocityProfile(double distance, double current_speed, double max_speed, double acceleration, double dt) {
+    if (distance <= 0.0) {
+        return 0.0;
+    }
+
+    if (acceleration <= 0.0 || dt <= 0.0) {
+        return 0.0;
+    }
+
+    const double stop_distance = (current_speed * current_speed) / (2.0 * acceleration);
+
+    if (distance <= stop_distance) {
+        current_speed -= acceleration * dt;
+
+        if (current_speed < 0.0) {
+            current_speed = 0.0;
+        }
+    } else {
+        current_speed += acceleration * dt;
+
+        if (current_speed > max_speed) {
+            current_speed = max_speed;
+        }
+    }
+
+    return current_speed;
+}
