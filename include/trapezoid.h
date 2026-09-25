@@ -160,30 +160,50 @@ double updateAngleVelocityProfile(double target_deg, double now_deg, double curr
     return next_speed;
 }
 
-double updateDistanceVelocityProfile(double distance, double current_speed, double max_speed, double acceleration, double dt) {
-    if (distance <= 0.0) {
+double updateDistanceVelocityProfile(double distance, double ref_speed, double measured_speed, double max_speed,
+                                     double acceleration, double dt, bool& decelerating) {
+    if (distance <= POSITION_TOLERANCE_MM) {
+        decelerating = false;
         return 0.0;
     }
 
     if (acceleration <= 0.0 || dt <= 0.0) {
-        return 0.0;
+        return ref_speed;
     }
 
-    const double stop_distance = (current_speed * current_speed) / (2.0 * acceleration);
+    // 実測速度が目標方向と逆
+    if (measured_speed < -5.0) {
+        ref_speed -= acceleration * dt;
+        return std::max(0.0, ref_speed);
+    }
 
-    if (distance <= stop_distance) {
-        current_speed -= acceleration * dt;
+    // まだ減速に入っていない場合だけ、
+    // 実測速度から減速開始を判定
+    if (!decelerating) {
 
-        if (current_speed < 0.0) {
-            current_speed = 0.0;
+        const double speed_for_stopping = std::max(std::fabs(measured_speed), std::fabs(ref_speed));
+
+        const double stop_distance = (speed_for_stopping * speed_for_stopping) / (2.0 * acceleration);
+
+        if (distance <= stop_distance) {
+            decelerating = true;
         }
+    }
+
+    if (decelerating) {
+        // 減速中はref_speedだけを使う
+        ref_speed -= acceleration * dt;
+
+        // 20 mmより遠い場合は最低100 mm/s、
+        // 20 mm以内では最低40 mm/s
+        const double minimum_speed =
+            (distance > APPROACH_DISTANCE_MM) ? FAR_MIN_TRANSLATION_SPEED_MM_S : MIN_TRANSLATION_SPEED_MM_S;
+
+        ref_speed = std::max(ref_speed, minimum_speed);
     } else {
-        current_speed += acceleration * dt;
-
-        if (current_speed > max_speed) {
-            current_speed = max_speed;
-        }
+        // 通常はref_speedを加速
+        ref_speed += acceleration * dt;
     }
 
-    return current_speed;
+    return std::min(ref_speed, max_speed);
 }

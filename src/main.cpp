@@ -77,6 +77,14 @@ constexpr uint8_t POSITION_MESSAGE_TYPE = 0x01;
 
 bool is_stopped = false;
 
+static double filtered_vx   = 0.0;
+static double filtered_vy   = 0.0;
+static double filtered_vdeg = 0.0;
+
+constexpr double VELOCITY_FILTER_ALPHA = 0.2;
+
+bool translation_decelerating = false;
+
 void drive_pid_reset() {
     drive_pid_1.reset();
     drive_pid_2.reset();
@@ -236,59 +244,80 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message
 void control_loop_task(void* args) {
     TickType_t wake_time = xTaskGetTickCount();
 
+    x_y_theta_deg previous_target = target_pos;
+
     while (true) {
         const double dt = CONTROL_CYCLE_MS / 1000.0;
 
-        const uint32_t start_time = micros();
         update_swerve_drives();
 
         odometry.update(dt);
 
         now_pos_deg = odometry.get_position_deg();
+        now_vel_deg = odometry.get_velocity_deg();
+
+        // 目標座標が変更されたら速度プロファイルを初期化
+        if (target_pos.x != previous_target.x || target_pos.y != previous_target.y || target_pos.deg != previous_target.deg) {
+            translation_decelerating = false;
+
+            ref_speed.x   = 0.0;
+            ref_speed.y   = 0.0;
+            ref_speed.deg = 0.0;
+
+            previous_target = target_pos;
+        }
 
         const double dx = target_pos.x - now_pos_deg.x;
         const double dy = target_pos.y - now_pos_deg.y;
 
         const double distance = hypot(dx, dy);
 
-        const double direction_x = dx / distance;
-        const double direction_y = dy / distance;
+        if (distance <= POSITION_TOLERANCE_MM) {
+            ref_speed.x              = 0.0;
+            ref_speed.y              = 0.0;
+            translation_decelerating = false;
+        } else {
+            const double direction_x = dx / distance;
+            const double direction_y = dy / distance;
 
-        const double current_speed = ref_speed.x * direction_x + ref_speed.y * direction_y;
+            const double current_speed = now_vel_deg.x * direction_x + now_vel_deg.y * direction_y;
 
-        const double linear_speed =
-            updateDistanceVelocityProfile(distance, current_speed, MAX_SHIFT_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+            const double calculate_speed = ref_speed.x * direction_x + ref_speed.y * direction_y;
 
-        ref_speed.x = direction_x * linear_speed;
-        ref_speed.y = direction_y * linear_speed;
+            const double linear_speed =
+                updateDistanceVelocityProfile(distance, calculate_speed, current_speed, MAX_SHIFT_SPEED_MM_S,
+                                              MAX_SHIFT_ACCELERATION, dt, translation_decelerating);
+
+            ref_speed.x = direction_x * linear_speed;
+            ref_speed.y = direction_y * linear_speed;
+        }
 
         ref_speed.deg = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, ref_speed.deg, MAX_ROTATE_SPEED_DEG_S,
                                                    MAX_ROTATE_ACCELERATION, dt);
 
         const double theta = now_pos_deg.deg * M_PI / 180.0;
-        const double c     = cos(theta);
-        const double s     = sin(theta);
 
-        // ワールド座標系速度 → ロボット座標系速度
+        const double c = cos(theta);
+        const double s = sin(theta);
+
         const double body_vx = c * ref_speed.x + s * ref_speed.y;
+
         const double body_vy = -s * ref_speed.x + c * ref_speed.y;
 
+        static uint32_t last_print = 0;
+
+        if (millis() - last_print >= 200) {
+            last_print = millis();
+
+            Serial.printf("target:(%.1f, %.1f) pos:(%.1f, %.1f) dist:%.1f "
+                          "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
+                          target_pos.x, target_pos.y, now_pos_deg.x, now_pos_deg.y, distance, now_vel_deg.x, now_vel_deg.y,
+                          ref_speed.x, ref_speed.y, body_vx, body_vy);
+        }
         set_robot_velocity(body_vx, body_vy, ref_speed.deg);
-        // set_robot_velocity(target_pos.x, target_pos.y, target_pos.deg);
 
         can.update();
-
         can_send();
-        // static uint32_t last_print_time = 0;
-        // const uint32_t  now             = millis();
-
-        // const uint32_t processing_time_us = micros() - start_time;
-
-        // if (now - last_print_time >= 1000) {
-        //     last_print_time = now;
-        //     Serial.printf("%lu us (%.3f ms)\r\n", static_cast<unsigned long>(processing_time_us), processing_time_us /
-        //     1000.0);
-        // }
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }

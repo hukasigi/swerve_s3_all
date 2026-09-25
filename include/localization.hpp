@@ -38,4 +38,12 @@ class Odometry {
 
         bool   inv_ok_{false};
         double invA_[3][3]{};
+
+        long velocity_count1_ = 0;
+        long velocity_count2_ = 0;
+        long velocity_count3_ = 0;
+
+        double velocity_elapsed_ = 0.0;
+
+        static constexpr double VELOCITY_UPDATE_PERIOD_S = 0.020;
 };

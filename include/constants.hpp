@@ -89,7 +89,7 @@ const double MAGNITUDE_DEADZONE = 15.0;
 const double CONTROL_CYCLE_MS   = 2.0;
 const double CONTROL_CYCLE_S    = CONTROL_CYCLE_MS / 1000.0;
 
-constexpr double TRANSLATION_DEADZONE_MM_S = 100.0;
+constexpr double TRANSLATION_DEADZONE_MM_S = 0.0;
 constexpr double ROTATION_DEADZONE_DEG_S   = 5.0;
 
 // PIDパラメータ
@@ -114,13 +114,10 @@ static constexpr double STEER_GEAR_RATIO_MOTOR_TO_STEER = 65.0 / 27.0;
 // ホイール物理最大速度（実機に合わせて調整）  482rpmなので2500mm/s
 constexpr double MAX_SHIFT_SPEED_MM_S = 2400.0;
 
-constexpr double MAX_ROTATE_SPEED_DEG_S = 300.0;
+constexpr double MAX_ROTATE_SPEED_DEG_S = 500.0;
 
-constexpr double MAX_SHIFT_ACCELERATION  = 1000.;
+constexpr double MAX_SHIFT_ACCELERATION  = 800.;
 constexpr double MAX_ROTATE_ACCELERATION = 300.;
-
-constexpr double STOP_VELOCITY_THRESHOLD_MM_S = 100.0;
-constexpr double STOP_ANGULAR_THRESHOLD_DEG_S = 5.0;
 
 // オドメトリ
 
@@ -149,10 +146,6 @@ constexpr double GEAR_RATIO = 1.0;
 
 constexpr double COUNTS_PER_MM = (ENCODER_RESOLUTION * GEAR_RATIO) / (M_PI * OD_RADIUS * 2.0);
 
-// 許容誤差
-constexpr double POSITION_TOLERANCE_MM = 10.0;
-constexpr double YAW_TOLERANCE_RAD     = 3 * M_PI / 180.0;
-
 const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行わない
 
 constexpr double ANGLE_DEAD_ZONE_DEG = 0.1;
@@ -168,6 +161,16 @@ const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
 constexpr double ODO_CENTER_OFFSET_X = 0.0;
 constexpr double ODO_CENTER_OFFSET_Y = 116.796;
 
+constexpr double APPROACH_DISTANCE_MM = 20.0;
+
+constexpr double FAR_MIN_TRANSLATION_SPEED_MM_S = 100.0;
+constexpr double MIN_TRANSLATION_SPEED_MM_S     = 40.0;
+
+constexpr double STOP_VELOCITY_THRESHOLD_MM_S = 200.0;
+constexpr double STOP_ANGULAR_THRESHOLD_DEG_S = 5.0;
+
+// 許容誤差
+constexpr double POSITION_TOLERANCE_MM = 5.0;
 // constexpr uint8_t GAMEPAD_MESSAGE_TYPE  = static_cast<uint8_t>(MessageType::Gamepad);
 // constexpr uint8_t POSITION_MESSAGE_TYPE = static_cast<uint8_t>(MessageType::RobotState);
 
