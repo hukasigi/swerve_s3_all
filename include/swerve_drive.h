@@ -88,13 +88,13 @@ class Drive {
             if (mode == ControlMode::Speed) {
                 const double current_mm_s = get_current_mm_s();
 
-                static uint32_t last_print_time = 0;
-                const uint32_t  now             = millis();
+                // static uint32_t last_print_time = 0;
+                // const uint32_t  now             = millis();
 
-                if (now - last_print_time >= 1000) {
-                    last_print_time = now;
-                    Serial.printf("%f\r\n", current_mm_s);
-                }
+                // if (now - last_print_time >= 1000) {
+                //     last_print_time = now;
+                //     Serial.printf("%f\r\n", current_mm_s);
+                // }
 
                 drive_command = pid->update(target_mm_s, current_mm_s, dt);
 

@@ -64,11 +64,11 @@ IncrementalEncoder enc_3(ENCODER_A_3, ENCODER_B_3);
 
 Odometry odometry(enc_1, enc_2, enc_3);
 
-x_y_theta_deg now_pos_deg;
-x_y_theta_deg target_pos;
-x_y_theta_deg ref_speed;
+Position        now_pos_deg;
+Position        target_pos;
+x_y_theta_deg_s ref_speed;
 
-x_y_theta_deg now_vel_deg;
+x_y_theta_deg_s now_vel_deg;
 
 constexpr uint8_t WIFI_CHANNEL          = 14;
 const peer_id_t   FROM_PEER_ID          = 0x11;
@@ -120,6 +120,7 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
     if (vx_mm_s == 0.0 && vy_mm_s == 0.0 && omega_deg_s == 0.0) {
 
         if (!is_stopped) {
+            stop_swerve_drives();
             set_outward_steering_targets();
             is_stopped = true;
         }
@@ -223,28 +224,27 @@ bool initialize_swerve_drives() {
     return true;
 }
 
-void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message>& messages) {
-
+void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
     for (const Message& message : messages) {
+
         if (message.type != POSITION_MESSAGE_TYPE) {
             continue;
         }
 
-        if (message.data.size() < 6) {
+        if (message.data.size() != sizeof(Position)) {
             Serial.println("invalid target data");
             continue;
         }
 
-        target_pos.x   = readInt16(message.data, 0);
-        target_pos.y   = readInt16(message.data, 2);
-        target_pos.deg = readInt16(message.data, 4);
+        // バイト列を構造体に戻す
+        memcpy(&target_pos, message.data.data(), sizeof(Position));
     }
 }
 
 void control_loop_task(void* args) {
     TickType_t wake_time = xTaskGetTickCount();
 
-    x_y_theta_deg previous_target = target_pos;
+    Position previous_target = target_pos;
 
     while (true) {
         const double dt = CONTROL_CYCLE_MS / 1000.0;
@@ -272,11 +272,9 @@ void control_loop_task(void* args) {
 
         const double distance = hypot(dx, dy);
 
-        if (distance <= POSITION_TOLERANCE_MM) {
-            ref_speed.x              = 0.0;
-            ref_speed.y              = 0.0;
-            translation_decelerating = false;
-        } else {
+        const double measured_translation_speed = hypot(now_vel_deg.x, now_vel_deg.y);
+
+        if (distance > 0.0) {
             const double direction_x = dx / distance;
             const double direction_y = dy / distance;
 
@@ -286,14 +284,27 @@ void control_loop_task(void* args) {
 
             const double linear_speed =
                 updateDistanceVelocityProfile(distance, calculate_speed, current_speed, MAX_SHIFT_SPEED_MM_S,
-                                              MAX_SHIFT_ACCELERATION, dt, translation_decelerating);
+                                              MAX_SHIFT_ACCELERATION, MAX_SHIFT_DECELERATION, dt, translation_decelerating);
 
             ref_speed.x = direction_x * linear_speed;
             ref_speed.y = direction_y * linear_speed;
+        } else {
+            ref_speed.x              = 0.0;
+            ref_speed.y              = 0.0;
+            translation_decelerating = false;
         }
+        const double angle_error = wrapAngle(static_cast<double>(target_pos.deg) - static_cast<double>(now_pos_deg.deg));
 
-        ref_speed.deg = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, ref_speed.deg, MAX_ROTATE_SPEED_DEG_S,
-                                                   MAX_ROTATE_ACCELERATION, dt);
+        const bool angle_reached = std::fabs(angle_error) <= ANGLE_TOLERANCE_DEG;
+
+        const bool angle_stopped = std::fabs(now_vel_deg.deg) <= ANGLE_STOP_SPEED_DEG_S;
+
+        if (angle_reached && angle_stopped) {
+            ref_speed.deg = 0.0;
+        } else {
+            ref_speed.deg = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, ref_speed.deg, MAX_ROTATE_SPEED_DEG_S,
+                                                       MAX_ROTATE_ACCELERATION, dt);
+        }
 
         const double theta = now_pos_deg.deg * M_PI / 180.0;
 
@@ -304,16 +315,16 @@ void control_loop_task(void* args) {
 
         const double body_vy = -s * ref_speed.x + c * ref_speed.y;
 
-        static uint32_t last_print = 0;
+        // static uint32_t last_print = 0;
 
-        if (millis() - last_print >= 200) {
-            last_print = millis();
+        // if (millis() - last_print >= 200) {
+        //     last_print = millis();
 
-            Serial.printf("target:(%.1f, %.1f) pos:(%.1f, %.1f) dist:%.1f "
-                          "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
-                          target_pos.x, target_pos.y, now_pos_deg.x, now_pos_deg.y, distance, now_vel_deg.x, now_vel_deg.y,
-                          ref_speed.x, ref_speed.y, body_vx, body_vy);
-        }
+        //     Serial.printf("target:(%.1f, %.1f) pos:(%.1f, %.1f) dist:%.1f "
+        //                   "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
+        //                   target_pos.x, target_pos.y, now_pos_deg.x, now_pos_deg.y, distance, now_vel_deg.x, now_vel_deg.y,
+        //                   ref_speed.x, ref_speed.y, body_vx, body_vy);
+        // }
         set_robot_velocity(body_vx, body_vy, ref_speed.deg);
 
         can.update();
@@ -374,8 +385,9 @@ void loop() {
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
         Message message;
         message.type = POSITION_MESSAGE_TYPE;
-        message.data = positionToPayload(now_pos_deg);
-        // message.data = positionToPayload(ref_speed);
+
+        message.data.resize(sizeof(now_pos_deg));
+        memcpy(message.data.data(), &now_pos_deg, sizeof(Position));
 
         std::vector<Message> messages{message};
 

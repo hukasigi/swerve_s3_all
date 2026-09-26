@@ -73,15 +73,16 @@ void Odometry::begin() {
 Position_rad Odometry::get_position_rad() const {
     return position_;
 }
-x_y_theta_deg Odometry::get_position_deg() const {
-    return {position_.x, position_.y, position_.rad * 180.0 / M_PI};
+Position Odometry::get_position_deg() const {
+    return {static_cast<int16_t>(std::lround(position_.x)), static_cast<int16_t>(std::lround(position_.y)),
+            static_cast<int16_t>(std::lround(position_.rad * 180.0 / M_PI))};
 }
 
 Position_rad Odometry::get_velocity_rad() const {
     return velocity_;
 }
 
-x_y_theta_deg Odometry::get_velocity_deg() const {
+x_y_theta_deg_s Odometry::get_velocity_deg() const {
     return {velocity_.x, velocity_.y, velocity_.rad * 180.0 / M_PI};
 }
 
