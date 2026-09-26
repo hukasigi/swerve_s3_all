@@ -176,11 +176,11 @@ constexpr double MAX_SHIFT_DECELERATION  = 1500.;
 constexpr double MAX_ROTATE_ACCELERATION = 300.;
 
 // 停止判定(速度)
-constexpr double POSITION_STOP_SPEED_MM_S = 5.0;
-constexpr double ANGLE_STOP_SPEED_DEG_S   = 2.0;
+constexpr double POSITION_STOP_SPEED_MM_S = 40.0;
+constexpr double ANGLE_STOP_SPEED_DEG_S   = 5.0;
 // 許容誤差
-constexpr double POSITION_TOLERANCE_MM = 15.0;
-constexpr double ANGLE_TOLERANCE_DEG   = 2.0;
+constexpr double POSITION_TOLERANCE_MM = 3.0;
+constexpr double ANGLE_TOLERANCE_DEG   = 1.0;
 
 // constexpr uint8_t GAMEPAD_MESSAGE_TYPE  = static_cast<uint8_t>(MessageType::Gamepad);
 // constexpr uint8_t POSITION_MESSAGE_TYPE = static_cast<uint8_t>(MessageType::RobotState);
