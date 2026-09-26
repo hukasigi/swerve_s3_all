@@ -95,8 +95,8 @@ const double MAGNITUDE_DEADZONE = 15.0;
 const double CONTROL_CYCLE_MS   = 2.0;
 const double CONTROL_CYCLE_S    = CONTROL_CYCLE_MS / 1000.0;
 
-constexpr double TRANSLATION_DEADZONE_MM_S = 0.0;
-constexpr double ROTATION_DEADZONE_DEG_S   = 5.0;
+constexpr double TRANSLATION_DEADZONE_MM_S = 10.0;
+constexpr double ROTATION_DEADZONE_DEG_S   = 1.0;
 
 // PIDパラメータ
 const struct PidParam STEERING_PID_PARAM = {.p_gain = 25., .i_gain = 0.0, .d_gain = 0.0};
@@ -167,7 +167,8 @@ constexpr double MIN_TRANSLATION_SPEED_MM_S = 300.0;
 constexpr double MIN_STOP_SPEED_MM_S        = 70.0;
 
 // ホイール物理最大速度（実機に合わせて調整）  482rpmなので2500mm/s
-constexpr double MAX_SHIFT_SPEED_MM_S = 2400.0;
+constexpr double MAX_SHIFT_SPEED_MM_S   = 2400.0;
+constexpr double STICK_SHIFT_SPEED_MM_S = 1200.0;
 
 constexpr double MAX_ROTATE_SPEED_DEG_S = 500.0;
 

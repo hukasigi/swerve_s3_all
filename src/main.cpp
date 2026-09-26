@@ -70,10 +70,15 @@ x_y_theta_deg_s ref_speed;
 
 x_y_theta_deg_s now_vel_deg;
 
-constexpr uint8_t WIFI_CHANNEL          = 14;
-const peer_id_t   FROM_PEER_ID          = 0x11;
-const peer_id_t   TO_PEER_ID            = 0x12;
-constexpr uint8_t POSITION_MESSAGE_TYPE = 0x01;
+MessageData::GamepadData received_gamepad_data{};
+volatile bool            gamepad_data_received   = false;
+volatile uint32_t        last_gamepad_receive_ms = 0;
+
+portMUX_TYPE gamepad_data_mux = portMUX_INITIALIZER_UNLOCKED;
+
+constexpr uint8_t WIFI_CHANNEL = 14;
+const peer_id_t   FROM_PEER_ID = 0x11;
+const peer_id_t   TO_PEER_ID   = 0x12;
 
 bool is_stopped = false;
 
@@ -183,20 +188,24 @@ void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) 
 }
 
 void handle_controller_input(int x_vec, int y_vec, uint8_t l2_value, uint8_t r2_value) {
-    constexpr double MAX_TRANSLATION_SPEED_MM_S = MAX_SHIFT_SPEED_MM_S;
-    constexpr double MAX_ROTATION_SPEED_DEG_S   = MAX_ROTATE_SPEED_DEG_S;
 
     constexpr double STICK_MAX   = 127.0;
     constexpr double TRIGGER_MAX = 255.0;
 
+    double magnitude = hypot((double)x_vec, (double)y_vec);
+
+    if (magnitude <= MAGNITUDE_DEADZONE) {
+        x_vec = 0;
+        y_vec = 0;
+    }
+
     // 右スティック：並進
-    const double vx = static_cast<double>(x_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
-    const double vy = static_cast<double>(y_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
+    const double vx = static_cast<double>(x_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
+    const double vy = -static_cast<double>(y_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
 
     // R2 - L2：旋回
     // 符号が逆なら l2_value と r2_value を入れ替える
-    const double omega =
-        (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATION_SPEED_DEG_S;
+    const double omega = (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATE_SPEED_DEG_S;
 
     set_robot_velocity(vx, vy, omega);
 }
@@ -226,18 +235,25 @@ bool initialize_swerve_drives() {
 
 void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
     for (const Message& message : messages) {
+        if (message.type == static_cast<uint8_t>(MessageType::RobotState)) {
+            if (message.data.size() != sizeof(Position)) {
+                Serial.println("invalid target data");
+                continue;
+            }
 
-        if (message.type != POSITION_MESSAGE_TYPE) {
-            continue;
+            memcpy(&target_pos, message.data.data(), sizeof(Position));
+        } else if (message.type == static_cast<uint8_t>(MessageType::Gamepad)) {
+            if (message.data.size() != sizeof(MessageData::GamepadData)) {
+                Serial.println("invalid gamepad data");
+                continue;
+            }
+
+            portENTER_CRITICAL(&gamepad_data_mux);
+
+            memcpy(&received_gamepad_data, message.data.data(), sizeof(MessageData::GamepadData));
+
+            portEXIT_CRITICAL(&gamepad_data_mux);
         }
-
-        if (message.data.size() != sizeof(Position)) {
-            Serial.println("invalid target data");
-            continue;
-        }
-
-        // バイト列を構造体に戻す
-        memcpy(&target_pos, message.data.data(), sizeof(Position));
     }
 }
 
@@ -246,8 +262,37 @@ void control_loop_task(void* args) {
 
     Position previous_target = target_pos;
 
+    bool previous_gamepad_active = false;
+
     while (true) {
         const double dt = CONTROL_CYCLE_MS / 1000.0;
+
+        MessageData::GamepadData gamepad_data{};
+        bool                     gamepad_received;
+        uint32_t                 gamepad_receive_time;
+
+        portENTER_CRITICAL(&gamepad_data_mux);
+
+        memcpy(&gamepad_data, &received_gamepad_data, sizeof(MessageData::GamepadData));
+
+        gamepad_received     = gamepad_data_received;
+        gamepad_receive_time = last_gamepad_receive_ms;
+
+        portEXIT_CRITICAL(&gamepad_data_mux);
+
+        const bool gamepad_active = gamepad_received && (millis() - gamepad_receive_time <= GAMEPAD_TIMEOUT_MS);
+
+        // Gamepad制御との切り替え時に、現在位置へ目標を更新
+        if (gamepad_active != previous_gamepad_active) {
+            target_pos = now_pos_deg;
+
+            ref_speed.x   = 0.0;
+            ref_speed.y   = 0.0;
+            ref_speed.deg = 0.0;
+
+            translation_decelerating = false;
+            previous_gamepad_active  = gamepad_active;
+        }
 
         update_swerve_drives();
 
@@ -315,17 +360,22 @@ void control_loop_task(void* args) {
 
         const double body_vy = -s * ref_speed.x + c * ref_speed.y;
 
-        // static uint32_t last_print = 0;
+        static uint32_t last_print = 0;
 
-        // if (millis() - last_print >= 200) {
-        //     last_print = millis();
+        if (millis() - last_print >= 200) {
+            last_print = millis();
 
-        //     Serial.printf("target:(%.1f, %.1f) pos:(%.1f, %.1f) dist:%.1f "
-        //                   "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
-        //                   target_pos.x, target_pos.y, now_pos_deg.x, now_pos_deg.y, distance, now_vel_deg.x, now_vel_deg.y,
-        //                   ref_speed.x, ref_speed.y, body_vx, body_vy);
-        // }
-        set_robot_velocity(body_vx, body_vy, ref_speed.deg);
+            Serial.printf("target:(%d, %d) pos:(%d, %d) dist:%.1f "
+                          "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
+                          target_pos.x, target_pos.y, now_pos_deg.x, now_pos_deg.y, distance, now_vel_deg.x, now_vel_deg.y,
+                          ref_speed.x, ref_speed.y, body_vx, body_vy);
+        }
+        if (gamepad_active) {
+            handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
+                                    gamepad_data.trigger_right);
+        } else {
+            set_robot_velocity(body_vx, body_vy, ref_speed.deg);
+        }
 
         can.update();
         can_send();
@@ -384,7 +434,7 @@ void loop() {
 
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
         Message message;
-        message.type = POSITION_MESSAGE_TYPE;
+        message.type = static_cast<uint8_t>(MessageType::RobotState);
 
         message.data.resize(sizeof(now_pos_deg));
         memcpy(message.data.data(), &now_pos_deg, sizeof(Position));
