@@ -73,7 +73,7 @@ void Odometry::begin() {
 Position_rad Odometry::get_position_rad() const {
     return position_;
 }
-Position Odometry::get_position_deg() const {
+TabletData Odometry::get_position_deg() const {
     return {static_cast<int16_t>(std::lround(position_.x)), static_cast<int16_t>(std::lround(position_.y)),
             static_cast<int16_t>(std::lround(position_.rad * 180.0 / M_PI))};
 }

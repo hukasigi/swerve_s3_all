@@ -36,12 +36,6 @@ struct TargetCommand {
         uint32_t        received_ms;
 };
 
-struct Position {
-        int16_t x;
-        int16_t y;
-        int16_t deg;
-};
-
 using pin_t = uint8_t;
 using ch_t  = uint8_t;
 

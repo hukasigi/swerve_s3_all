@@ -26,7 +26,7 @@ int16_t readInt16(const std::vector<uint8_t>& data, size_t index) {
     return static_cast<int16_t>(value);
 }
 
-bool is_gamepad_neutral(const MessageData::GamepadData& data) {
+bool is_gamepad_neutral(const GamepadData& data) {
     return data.joystick_left.x == 0 && data.joystick_left.y == 0 && data.joystick_right.x == 0 && data.joystick_right.y == 0 &&
            data.trigger_left == 0 && data.trigger_right == 0 && data.buttons.raw == 0 && data.dpad == Dpad::Neutral;
 }
