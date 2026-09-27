@@ -17,6 +17,15 @@ struct Position_rad {
         Position_rad(double x_, double y_, double yaw_) : x(x_), y(y_), rad(yaw_) {}
 };
 
+struct Position_deg {
+        int16_t x;
+        int16_t y;
+        int16_t deg;
+
+        Position_deg() : x(0), y(0), deg(0) {}
+        Position_deg(int16_t x_, int16_t y_, int16_t yaw_) : x(x_), y(y_), deg(yaw_) {}
+};
+
 struct x_y_theta_deg_s {
         double x;
         double y;

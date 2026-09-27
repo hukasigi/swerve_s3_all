@@ -277,7 +277,7 @@ void control_loop_task(void* args) {
 
         odometry.update(dt);
 
-        const auto current_position = odometry.get_position_deg();
+        const Position_deg current_position = odometry.get_position_deg();
 
         now_status.x   = current_position.x;
         now_status.y   = current_position.y;

@@ -14,7 +14,7 @@ class Odometry {
         void            begin();
         Position_rad    get_position_rad() const;
         Position_rad    get_velocity_rad() const;
-        TabletData      get_position_deg() const;
+        Position_deg    get_position_deg() const;
         x_y_theta_deg_s get_velocity_deg() const;
         void            update(double dt);
 
