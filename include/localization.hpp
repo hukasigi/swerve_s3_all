@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "constants.hpp"
+#include "message.h"
 #include "nnct/interfaces/incremental_encoder.hpp"
 
 class Odometry {
@@ -10,12 +11,12 @@ class Odometry {
         Odometry(nnct::interfaces::IncrementalEncoder& encoder1, nnct::interfaces::IncrementalEncoder& encoder2,
                  nnct::interfaces::IncrementalEncoder& encoder3);
 
-        void          begin();
-        Position_rad  get_position_rad() const;
-        Position_rad  get_velocity_rad() const;
-        x_y_theta_deg get_position_deg() const;
-        x_y_theta_deg get_velocity_deg() const;
-        void          update(double dt);
+        void            begin();
+        Position_rad    get_position_rad() const;
+        Position_rad    get_velocity_rad() const;
+        Position_deg    get_position_deg() const;
+        x_y_theta_deg_s get_velocity_deg() const;
+        void            update(double dt);
 
     private:
         static bool Invert3x3(const double A[3][3], double invA[3][3]);
@@ -38,4 +39,12 @@ class Odometry {
 
         bool   inv_ok_{false};
         double invA_[3][3]{};
+
+        long velocity_count1_ = 0;
+        long velocity_count2_ = 0;
+        long velocity_count3_ = 0;
+
+        double velocity_elapsed_ = 0.0;
+
+        static constexpr double VELOCITY_UPDATE_PERIOD_S = 0.020;
 };

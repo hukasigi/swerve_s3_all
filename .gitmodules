@@ -1,0 +1,12 @@
+[submodule "lib/PID_library"]
+	path = lib/PID_library
+	url = git@github.com:hukasigi/PID_library.git
+[submodule "lib/MCP_CAN_lib"]
+	path = lib/MCP_CAN_lib
+	url = git@github.com:coryjfowler/MCP_CAN_lib.git
+[submodule "lib/nnct-lib-feat-hukas"]
+	path = lib/nnct-lib-feat-hukas
+	url = git@github.com:hukasigi/nnct-lib-feat-hukas.git
+[submodule "lib/utility"]
+	path = lib/utility
+	url = git@github.com:NiiRoboKen/robocon_2026_utility.git

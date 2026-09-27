@@ -1,4 +1,5 @@
 #include "localization.hpp"
+#include "constants.hpp"
 
 double wrapPi(double rad) {
     while (rad > M_PI)
@@ -72,15 +73,16 @@ void Odometry::begin() {
 Position_rad Odometry::get_position_rad() const {
     return position_;
 }
-x_y_theta_deg Odometry::get_position_deg() const {
-    return {position_.x, position_.y, position_.rad * 180.0 / M_PI};
+Position_deg Odometry::get_position_deg() const {
+    return {static_cast<int16_t>(std::lround(position_.x)), static_cast<int16_t>(std::lround(position_.y)),
+            static_cast<int16_t>(std::lround(position_.rad * 180.0 / M_PI))};
 }
 
 Position_rad Odometry::get_velocity_rad() const {
     return velocity_;
 }
 
-x_y_theta_deg Odometry::get_velocity_deg() const {
+x_y_theta_deg_s Odometry::get_velocity_deg() const {
     return {velocity_.x, velocity_.y, velocity_.rad * 180.0 / M_PI};
 }
 
@@ -94,9 +96,6 @@ void Odometry::_buildInverse() {
     const double c3 = cos(a3), s3 = sin(a3);
 
     const double k = -ROBOT_TO_ODO_RADIUS;
-
-    constexpr double ODO_CENTER_OFFSET_X = 0.0;
-    constexpr double ODO_CENTER_OFFSET_Y = 17.320;
 
     const double b1 = k + ODO_CENTER_OFFSET_X * s1 - ODO_CENTER_OFFSET_Y * c1;
     const double b2 = k + ODO_CENTER_OFFSET_X * s2 - ODO_CENTER_OFFSET_Y * c2;

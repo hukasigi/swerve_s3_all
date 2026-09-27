@@ -3,6 +3,7 @@
 #include "Pid.h"
 #include "constants.hpp"
 #include "localization.hpp"
+#include "message.h"
 #include "nnct/interfaces/interfaces.hpp"
 #include "nnct/interfaces/spi_mutex.hpp"
 #include "peer_link.h"
@@ -63,16 +64,31 @@ IncrementalEncoder enc_3(ENCODER_A_3, ENCODER_B_3);
 
 Odometry odometry(enc_1, enc_2, enc_3);
 
-x_y_theta_deg now_pos_deg;
-x_y_theta_deg target_pos;
-x_y_theta_deg ref_speed;
+TabletData      now_status;
+TabletData      target_status;
+x_y_theta_deg_s ref_speed;
 
-constexpr uint8_t WIFI_CHANNEL          = 14;
-const peer_id_t   FROM_PEER_ID          = 0x11;
-const peer_id_t   TO_PEER_ID            = 0x12;
-constexpr uint8_t POSITION_MESSAGE_TYPE = 0x01;
+x_y_theta_deg_s now_vel_deg;
+
+GamepadData       received_gamepad_data{};
+volatile bool     gamepad_data_received   = false;
+volatile uint32_t last_gamepad_receive_ms = 0;
+
+portMUX_TYPE gamepad_data_mux = portMUX_INITIALIZER_UNLOCKED;
+
+constexpr uint8_t WIFI_CHANNEL = 14;
+const peer_id_t   FROM_PEER_ID = 0x11;
+const peer_id_t   TO_PEER_ID   = 0x12;
 
 bool is_stopped = false;
+
+static double filtered_vx   = 0.0;
+static double filtered_vy   = 0.0;
+static double filtered_vdeg = 0.0;
+
+constexpr double VELOCITY_FILTER_ALPHA = 0.2;
+
+bool translation_decelerating = false;
 
 void drive_pid_reset() {
     drive_pid_1.reset();
@@ -109,6 +125,7 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
     if (vx_mm_s == 0.0 && vy_mm_s == 0.0 && omega_deg_s == 0.0) {
 
         if (!is_stopped) {
+            stop_swerve_drives();
             set_outward_steering_targets();
             is_stopped = true;
         }
@@ -171,20 +188,24 @@ void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) 
 }
 
 void handle_controller_input(int x_vec, int y_vec, uint8_t l2_value, uint8_t r2_value) {
-    constexpr double MAX_TRANSLATION_SPEED_MM_S = MAX_SHIFT_SPEED_MM_S;
-    constexpr double MAX_ROTATION_SPEED_DEG_S   = MAX_ROTATE_SPEED_DEG_S;
 
     constexpr double STICK_MAX   = 127.0;
     constexpr double TRIGGER_MAX = 255.0;
 
+    double magnitude = hypot((double)x_vec, (double)y_vec);
+
+    if (magnitude <= MAGNITUDE_DEADZONE) {
+        x_vec = 0;
+        y_vec = 0;
+    }
+
     // 右スティック：並進
-    const double vx = static_cast<double>(x_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
-    const double vy = static_cast<double>(y_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
+    const double vx = static_cast<double>(x_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
+    const double vy = -static_cast<double>(y_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
 
     // R2 - L2：旋回
     // 符号が逆なら l2_value と r2_value を入れ替える
-    const double omega =
-        (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATION_SPEED_DEG_S;
+    const double omega = (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATE_SPEED_DEG_S;
 
     set_robot_velocity(vx, vy, omega);
 }
@@ -212,70 +233,151 @@ bool initialize_swerve_drives() {
     return true;
 }
 
-void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<struct Message>& messages) {
-
+void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
     for (const Message& message : messages) {
-        if (message.type != POSITION_MESSAGE_TYPE) {
-            continue;
-        }
+        if (message.type == static_cast<uint8_t>(MessageType::RobotState)) {
+            if (message.data.size() != sizeof(TabletData)) {
+                Serial.println("invalid target data");
+                continue;
+            }
 
-        if (message.data.size() < 6) {
-            Serial.println("invalid target data");
-            continue;
-        }
+            memcpy(&target_status, message.data.data(), sizeof(TabletData));
+        } else if (message.type == static_cast<uint8_t>(MessageType::Gamepad)) {
+            if (message.data.size() != sizeof(GamepadData)) {
+                Serial.println("invalid gamepad data");
+                continue;
+            }
 
-        target_pos.x   = readInt16(message.data, 0);
-        target_pos.y   = readInt16(message.data, 2);
-        target_pos.deg = readInt16(message.data, 4);
+            portENTER_CRITICAL(&gamepad_data_mux);
+
+            memcpy(&received_gamepad_data, message.data.data(), sizeof(GamepadData));
+
+            portEXIT_CRITICAL(&gamepad_data_mux);
+        }
     }
 }
 
 void control_loop_task(void* args) {
     TickType_t wake_time = xTaskGetTickCount();
 
+    TabletData previous_target = target_status;
+
     while (true) {
         const double dt = CONTROL_CYCLE_MS / 1000.0;
 
-        const uint32_t start_time = micros();
+        GamepadData gamepad_data{};
+
+        portENTER_CRITICAL(&gamepad_data_mux);
+
+        memcpy(&gamepad_data, &received_gamepad_data, sizeof(GamepadData));
+
+        portEXIT_CRITICAL(&gamepad_data_mux);
+
         update_swerve_drives();
 
         odometry.update(dt);
 
-        now_pos_deg = odometry.get_position_deg();
+        const Position_deg current_position = odometry.get_position_deg();
 
-        ref_speed.x =
-            updateVelocityProfile(target_pos.x, now_pos_deg.x, ref_speed.x, MAX_SHIFT_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+        now_status.x   = current_position.x;
+        now_status.y   = current_position.y;
+        now_status.deg = current_position.deg;
 
-        ref_speed.y =
-            updateVelocityProfile(target_pos.y, now_pos_deg.y, ref_speed.y, MAX_SHIFT_SPEED_MM_S, MAX_SHIFT_ACCELERATION, dt);
+        // Gamepad制御との切り替え時に、現在位置へ目標を更新
+        if (target_status.gamepad_use != now_status.gamepad_use) {
+            now_status.gamepad_use = target_status.gamepad_use;
 
-        ref_speed.deg = updateAngleVelocityProfile(target_pos.deg, now_pos_deg.deg, ref_speed.deg, MAX_ROTATE_SPEED_DEG_S,
-                                                   MAX_ROTATE_ACCELERATION, dt);
+            target_status.x   = now_status.x;
+            target_status.y   = now_status.y;
+            target_status.deg = now_status.deg;
 
-        const double theta = now_pos_deg.deg * M_PI / 180.0;
-        const double c     = cos(theta);
-        const double s     = sin(theta);
+            ref_speed.x   = 0.0;
+            ref_speed.y   = 0.0;
+            ref_speed.deg = 0.0;
 
-        // ワールド座標系速度 → ロボット座標系速度
+            translation_decelerating = false;
+            previous_target          = target_status;
+        }
+
+        now_vel_deg = odometry.get_velocity_deg();
+
+        // 目標座標が変更されたら速度プロファイルを初期化
+        if (target_status.x != previous_target.x || target_status.y != previous_target.y ||
+            target_status.deg != previous_target.deg) {
+            translation_decelerating = false;
+
+            ref_speed.x   = 0.0;
+            ref_speed.y   = 0.0;
+            ref_speed.deg = 0.0;
+
+            previous_target = target_status;
+        }
+
+        const double dx = target_status.x - now_status.x;
+        const double dy = target_status.y - now_status.y;
+
+        const double distance = hypot(dx, dy);
+
+        if (distance > 0.0) {
+            const double direction_x = dx / distance;
+            const double direction_y = dy / distance;
+
+            const double current_speed = now_vel_deg.x * direction_x + now_vel_deg.y * direction_y;
+
+            const double calculate_speed = ref_speed.x * direction_x + ref_speed.y * direction_y;
+
+            const double linear_speed =
+                updateDistanceVelocityProfile(distance, calculate_speed, current_speed, MAX_SHIFT_SPEED_MM_S,
+                                              MAX_SHIFT_ACCELERATION, MAX_SHIFT_DECELERATION, dt, translation_decelerating);
+
+            ref_speed.x = direction_x * linear_speed;
+            ref_speed.y = direction_y * linear_speed;
+        } else {
+            ref_speed.x              = 0.0;
+            ref_speed.y              = 0.0;
+            translation_decelerating = false;
+        }
+        const double angle_error = wrapAngle(static_cast<double>(target_status.deg) - static_cast<double>(now_status.deg));
+
+        const bool angle_reached = std::fabs(angle_error) <= ANGLE_TOLERANCE_DEG;
+
+        const bool angle_stopped = std::fabs(now_vel_deg.deg) <= ANGLE_STOP_SPEED_DEG_S;
+
+        if (angle_reached && angle_stopped) {
+            ref_speed.deg = 0.0;
+        } else {
+            ref_speed.deg = updateAngleVelocityProfile(target_status.deg, now_status.deg, ref_speed.deg, MAX_ROTATE_SPEED_DEG_S,
+                                                       MAX_ROTATE_ACCELERATION, dt);
+        }
+
+        const double theta = now_status.deg * M_PI / 180.0;
+
+        const double c = cos(theta);
+        const double s = sin(theta);
+
         const double body_vx = c * ref_speed.x + s * ref_speed.y;
+
         const double body_vy = -s * ref_speed.x + c * ref_speed.y;
 
-        set_robot_velocity(body_vx, body_vy, ref_speed.deg);
-        // set_robot_velocity(target_pos.x, target_pos.y, target_pos.deg);
+        // static uint32_t last_print = 0;
+
+        // if (millis() - last_print >= 200) {
+        //     last_print = millis();
+
+        //     Serial.printf("target:(%d, %d) pos:(%d, %d) dist:%.1f "
+        //                   "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
+        //                   target_status.x, target_status.y, now_status.x, now_status.y, distance, now_vel_deg.x,
+        //                   now_vel_deg.y, ref_speed.x, ref_speed.y, body_vx, body_vy);
+        // }
+        if (now_status.gamepad_use) {
+            handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
+                                    gamepad_data.trigger_right);
+        } else {
+            set_robot_velocity(body_vx, body_vy, ref_speed.deg);
+        }
 
         can.update();
-
         can_send();
-        // static uint32_t last_print_time = 0;
-        // const uint32_t  now             = millis();
-
-        // const uint32_t processing_time_us = micros() - start_time;
-
-        // if (now - last_print_time >= 1000) {
-        //     last_print_time = now;
-        //     Serial.printf("%lu us (%.3f ms)\r\n", static_cast<unsigned long>(processing_time_us), processing_time_us /
-        //     1000.0);
-        // }
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
@@ -331,9 +433,10 @@ void loop() {
 
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
         Message message;
-        message.type = POSITION_MESSAGE_TYPE;
-        message.data = positionToPayload(now_pos_deg);
-        // message.data = positionToPayload(ref_speed);
+        message.type = static_cast<uint8_t>(MessageType::RobotState);
+
+        message.data.resize(sizeof(now_status));
+        memcpy(message.data.data(), &now_status, sizeof(TabletData));
 
         std::vector<Message> messages{message};
 

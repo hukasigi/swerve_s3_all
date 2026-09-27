@@ -17,13 +17,22 @@ struct Position_rad {
         Position_rad(double x_, double y_, double yaw_) : x(x_), y(y_), rad(yaw_) {}
 };
 
-struct x_y_theta_deg {
+struct Position_deg {
+        int16_t x;
+        int16_t y;
+        int16_t deg;
+
+        Position_deg() : x(0), y(0), deg(0) {}
+        Position_deg(int16_t x_, int16_t y_, int16_t yaw_) : x(x_), y(y_), deg(yaw_) {}
+};
+
+struct x_y_theta_deg_s {
         double x;
         double y;
         double deg;
 
-        x_y_theta_deg() : x(0.0), y(0.0), deg(0.0) {}
-        x_y_theta_deg(double x_, double y_, double yaw_) : x(x_), y(y_), deg(yaw_) {}
+        x_y_theta_deg_s() : x(0.0), y(0.0), deg(0.0) {}
+        x_y_theta_deg_s(double x_, double y_, double yaw_) : x(x_), y(y_), deg(yaw_) {}
 };
 
 struct ModulePosition {
@@ -32,8 +41,8 @@ struct ModulePosition {
 };
 
 struct TargetCommand {
-        x_y_theta_deg position;
-        uint32_t      received_ms;
+        x_y_theta_deg_s position;
+        uint32_t        received_ms;
 };
 
 using pin_t = uint8_t;
@@ -90,11 +99,11 @@ const double CONTROL_CYCLE_MS   = 2.0;
 const double CONTROL_CYCLE_S    = CONTROL_CYCLE_MS / 1000.0;
 
 constexpr double TRANSLATION_DEADZONE_MM_S = 10.0;
-constexpr double ROTATION_DEADZONE_DEG_S   = 5.0;
+constexpr double ROTATION_DEADZONE_DEG_S   = 1.0;
 
 // PIDパラメータ
 const struct PidParam STEERING_PID_PARAM = {.p_gain = 25., .i_gain = 0.0, .d_gain = 0.0};
-const struct PidParam DRIVE_PID_PARAM    = {.p_gain = 0.4, .i_gain = 0.0, .d_gain = 0.0};
+const struct PidParam DRIVE_PID_PARAM    = {.p_gain = 0.5, .i_gain = 0.0, .d_gain = 0.0};
 
 // FreeRTOS
 constexpr uint32_t CONTROL_LOOP_TASK_STACK_SIZE = 8192;
@@ -110,19 +119,6 @@ static constexpr double DRIVE_GEAR_RATIO = 19.0 / 1.0; // モーター:ホイー
 // static constexpr double DRIVE_GEAR_RATIO = 1.0; // モーター:ホイールの速度比
 
 static constexpr double STEER_GEAR_RATIO_MOTOR_TO_STEER = 65.0 / 27.0;
-
-static const int32_t CALIBRATING_DUTY = 150;
-
-// ホイール物理最大速度（実機に合わせて調整）  482rpmなので2500mm/s
-constexpr double MAX_SHIFT_SPEED_MM_S = 2000.0;
-
-constexpr double MAX_ROTATE_SPEED_DEG_S = 300.0;
-
-constexpr double MAX_SHIFT_ACCELERATION  = 800.;
-constexpr double MAX_ROTATE_ACCELERATION = 200.;
-
-constexpr double STOP_VELOCITY_THRESHOLD_MM_S = 100.0;
-constexpr double STOP_ANGULAR_THRESHOLD_DEG_S = 20.0;
 
 // オドメトリ
 
@@ -151,16 +147,46 @@ constexpr double GEAR_RATIO = 1.0;
 
 constexpr double COUNTS_PER_MM = (ENCODER_RESOLUTION * GEAR_RATIO) / (M_PI * OD_RADIUS * 2.0);
 
-// 許容誤差
-constexpr double POSITION_TOLERANCE_MM = 3.0;
-constexpr double YAW_TOLERANCE_RAD     = 2.0 * M_PI / 180.0;
-
 const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行わない
+
+constexpr double ANGLE_DEAD_ZONE_DEG = 0.1;
 
 // TODO:実機の車輪位置に合わせて変更してください
 // x: 前後方向、y: 左右方向
 const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
-    {0,        -390.06}, // module 1
-    {337.802,  195.03 }, // module 2
-    {-337.802, 195.03 }, // module 3
+    {0,        -338.623}, // module 1
+    {394.405,  344.506 }, // module 2
+    {-394.405, 344.506 }, // module 3
 };
+
+constexpr double ODO_CENTER_OFFSET_X = 0.0;
+constexpr double ODO_CENTER_OFFSET_Y = 116.796;
+
+constexpr int16_t STEER_TURN_LIMIT  = 2;
+constexpr double  STEER_RETURN_DUTY = 255.0;
+
+// 最低速度
+constexpr double MIN_TRANSLATION_SPEED_MM_S = 300.0;
+constexpr double MIN_STOP_SPEED_MM_S        = 70.0;
+
+// ホイール物理最大速度（実機に合わせて調整）  482rpmなので2500mm/s
+constexpr double MAX_SHIFT_SPEED_MM_S   = 2400.0;
+constexpr double STICK_SHIFT_SPEED_MM_S = 1200.0;
+
+constexpr double MAX_ROTATE_SPEED_DEG_S = 500.0;
+
+constexpr double MAX_SHIFT_ACCELERATION  = 2000.;
+constexpr double MAX_SHIFT_DECELERATION  = 1500.;
+constexpr double MAX_ROTATE_ACCELERATION = 300.;
+
+// 停止判定(速度)
+constexpr double POSITION_STOP_SPEED_MM_S = 40.0;
+constexpr double ANGLE_STOP_SPEED_DEG_S   = 5.0;
+// 許容誤差
+constexpr double POSITION_TOLERANCE_MM = 3.0;
+constexpr double ANGLE_TOLERANCE_DEG   = 1.0;
+
+// constexpr uint8_t GAMEPAD_MESSAGE_TYPE  = static_cast<uint8_t>(MessageType::Gamepad);
+// constexpr uint8_t POSITION_MESSAGE_TYPE = static_cast<uint8_t>(MessageType::RobotState);
+
+constexpr uint32_t GAMEPAD_TIMEOUT_MS = 250;
