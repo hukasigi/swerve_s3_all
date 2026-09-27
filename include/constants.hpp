@@ -55,7 +55,7 @@ const ch_t   STEERING_MOTOR_CH_1       = 0;
 const id_t   DRIVE_MOTOR_ID_1          = 0x01; // TODO:変更
 const pin_t  STEERING_ABS_ENCODER_CS_1 = 8;
 const pin_t  STEERING_LIMIT_SW_1       = 4;
-const double OFFSET_DEG_1              = 294.95;
+const double OFFSET_DEG_1              = 67.45;
 
 // ステアリング2
 const pin_t  STEERING_MOTOR_DIR_2      = 41;

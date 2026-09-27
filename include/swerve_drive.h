@@ -12,20 +12,54 @@ using namespace nnct::interfaces;
 class Steering {
     public:
         Steering(Motor* motor, nnct::Amt223dv* encoder, AnglePID* pid, double offset_deg, uint8_t ID)
-            : motor(motor), encoder(encoder), pid(pid), target_degree(0), offset_degree(offset_deg), ID(ID) {}
+            : motor(motor), encoder(encoder), pid(pid), target_degree(0.0), offset_degree(offset_deg), ID(ID),
+              twist_release(false), twist_target_turns(0) {}
 
         void begin() {
             encoder->begin();
             motor->stop();
         }
 
-        void   set_target(double degree) { this->target_degree = degree; }
+        void set_target(double degree) { this->target_degree = degree; }
+
         double get_current_degree() {
             // 絶対角度からオフセットを減算
             const double absolute_degree = static_cast<double>(encoder->positionDeg());
             return normalizeAngleDeg(absolute_degree - offset_degree);
         }
+
+        int16_t get_turns() const { return encoder->turns(); }
+
+        bool needsTwistRelease() const {
+            const int16_t turns = encoder->turns();
+
+            return turns >= STEER_TURN_LIMIT || turns <= -STEER_TURN_LIMIT;
+        }
+
+        void releaseTwist() {
+            const int16_t current_turns = encoder->turns();
+
+            if (current_turns >= STEER_TURN_LIMIT) {
+                twist_target_turns = current_turns - 1;
+                twist_release      = true;
+            } else if (current_turns <= -STEER_TURN_LIMIT) {
+                twist_target_turns = current_turns + 1;
+                twist_release      = true;
+            } else {
+                twist_release = false;
+                motor->stop();
+            }
+        }
+
+        bool isTwistReleasing() const { return twist_release; }
+
         void update(double dt) {
+
+            if (twist_release) {
+                updateTwistRelease();
+                return;
+            }
+
             const double current_degree = get_current_degree();
             double       duty           = pid->update(target_degree, current_degree, dt);
             const double error          = pid->getError();
@@ -46,6 +80,22 @@ class Steering {
             return a;
         }
 
+        void updateTwistRelease() {
+            const int16_t current_turns = encoder->turns();
+
+            if (current_turns == twist_target_turns) {
+                twist_release = false;
+                motor->stop();
+                return;
+            }
+
+            if (current_turns > twist_target_turns) {
+                motor->run(-STEER_RETURN_DUTY, -1);
+            } else {
+                motor->run(STEER_RETURN_DUTY, -1);
+            }
+        }
+
         Motor*          motor;
         nnct::Amt223dv* encoder;
         AnglePID*       pid;
@@ -53,6 +103,9 @@ class Steering {
         double        target_degree;
         double        offset_degree;
         const uint8_t ID;
+
+        bool    twist_release;
+        int16_t twist_target_turns;
 };
 
 class Drive {
@@ -152,6 +205,9 @@ class SwerveDrive {
         void set_deg(double degree) { steering->set_target(degree); }
 
         void stop_drive() { drive->stop(); }
+
+        bool needsTwistRelease() { return steering->needsTwistRelease(); }
+        void releaseTwist() { steering->releaseTwist(); }
         void update(double dt) {
             this->steering->update(dt);
             this->drive->update(dt);
