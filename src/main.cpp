@@ -64,16 +64,16 @@ IncrementalEncoder enc_3(ENCODER_A_3, ENCODER_B_3);
 
 Odometry odometry(enc_1, enc_2, enc_3);
 
-TabletData      now_pos;
-TabletData      target_pos;
-StateData       nowState;
-IsGamePad       targetState;
+TabletData_Pos  now_pos;
+TabletData_Pos  target_pos;
+StateData       now_state;
+TabletOrder     order_data{};
 x_y_theta_deg_s ref_speed;
 
 x_y_theta_deg_s now_vel_deg;
 
-GamepadData       received_gamepad_data{};
-IsGamePad         received_state_data{};
+GamepadData received_gamepad_data{};
+
 volatile bool     gamepad_data_received   = false;
 volatile uint32_t last_gamepad_receive_ms = 0;
 
@@ -243,13 +243,13 @@ bool initialize_swerve_drives() {
 
 void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
     for (const Message& message : messages) {
-        if (message.type == static_cast<uint8_t>(MessageType::Tablet)) {
-            if (message.data.size() != sizeof(TabletData)) {
+        if (message.type == static_cast<uint8_t>(MessageType::TabletPos)) {
+            if (message.data.size() != sizeof(TabletData_Pos)) {
                 Serial.println("invalid target data");
                 continue;
             }
 
-            memcpy(&target_pos, message.data.data(), sizeof(TabletData));
+            memcpy(&target_pos, message.data.data(), sizeof(TabletData_Pos));
         } else if (message.type == static_cast<uint8_t>(MessageType::Gamepad)) {
             if (message.data.size() != sizeof(GamepadData)) {
                 Serial.println("invalid gamepad data");
@@ -261,13 +261,13 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
             memcpy(&received_gamepad_data, message.data.data(), sizeof(GamepadData));
 
             portEXIT_CRITICAL(&gamepad_data_mux);
-        } else if (message.type == static_cast<uint8_t>(MessageType::RobotState)) {
-            if (message.data.size() != sizeof(StateData)) {
+        } else if (message.type == static_cast<uint8_t>(MessageType::TabletOrder)) {
+            if (message.data.size() != sizeof(TabletOrder)) {
                 Serial.println("invalid state data");
                 continue;
             }
 
-            memcpy(&received_state_data, message.data.data(), sizeof(StateData));
+            memcpy(&order_data, message.data.data(), sizeof(TabletOrder));
         }
     }
 }
@@ -275,7 +275,7 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 void control_loop_task(void* args) {
     TickType_t wake_time = xTaskGetTickCount();
 
-    TabletData previous_target = target_pos;
+    TabletData_Pos previous_target = target_pos;
 
     while (true) {
         const double dt = CONTROL_CYCLE_MS / 1000.0;
@@ -299,8 +299,8 @@ void control_loop_task(void* args) {
         now_pos.deg = current_position.deg;
 
         // Gamepad制御との切り替え時に、現在位置へ目標を更新
-        if (targetState.gamepad_use != nowState.gamepad_used) {
-            nowState.gamepad_used = targetState.gamepad_use;
+        if (order_data.gamepad_use != now_state.gamepad_used) {
+            now_state.gamepad_used = order_data.gamepad_use;
 
             target_pos.x   = now_pos.x;
             target_pos.y   = now_pos.y;
@@ -373,20 +373,22 @@ void control_loop_task(void* args) {
 
         const double body_vy = -s * ref_speed.x + c * ref_speed.y;
 
-        // static uint32_t last_print = 0;
+        static uint32_t last_print = 0;
 
-        // if (millis() - last_print >= 200) {
-        //     last_print = millis();
+        if (millis() - last_print >= 200) {
+            last_print = millis();
 
-        //     Serial.printf("target:(%d, %d) pos:(%d, %d) dist:%.1f "
-        //                   "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
-        //                   target_status.x, target_status.y, now_status.x, now_status.y, distance, now_vel_deg.x,
-        //                   now_vel_deg.y, ref_speed.x, ref_speed.y, body_vx, body_vy);
-        // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d  steer_deg%f  steer_deg%f  steer_deg%f\n",
-        //               steering_1.get_turns(), steering_2.get_turns(), steering_3.get_turns(),
-        //               steering_1.get_current_degree(), steering_2.get_current_degree(), steering_3.get_current_degree());
-        // }
-        if (nowState.gamepad_used) {
+            //     Serial.printf("target:(%d, %d) pos:(%d, %d) dist:%.1f "
+            //                   "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
+            //                   target_status.x, target_status.y, now_status.x, now_status.y, distance, now_vel_deg.x,
+            //                   now_vel_deg.y, ref_speed.x, ref_speed.y, body_vx, body_vy);
+            // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d  steer_deg%f  steer_deg%f  steer_deg%f\n",
+            //               steering_1.get_turns(), steering_2.get_turns(), steering_3.get_turns(),
+            //               steering_1.get_current_degree(), steering_2.get_current_degree(), steering_3.get_current_degree());
+            Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
+                          steering_2.get_turns(), steering_3.get_turns());
+        }
+        if (now_state.gamepad_used) {
             handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
                                     gamepad_data.trigger_right);
         } else {
@@ -449,13 +451,23 @@ void loop() {
     // }
 
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
-        Message message;
-        message.type = static_cast<uint8_t>(MessageType::RobotState);
+        std::vector<Message> messages;
 
-        message.data.resize(sizeof(now_pos));
-        memcpy(message.data.data(), &now_pos, sizeof(TabletData));
+        Message pos_message;
+        pos_message.type = static_cast<uint8_t>(MessageType::TabletPos);
+        pos_message.data.resize(sizeof(TabletData_Pos));
 
-        std::vector<Message> messages{message};
+        memcpy(pos_message.data.data(), &now_pos, sizeof(TabletData_Pos));
+
+        messages.push_back(pos_message);
+
+        Message state_message;
+        state_message.type = static_cast<uint8_t>(MessageType::RobotState);
+        state_message.data.resize(sizeof(StateData));
+
+        memcpy(state_message.data.data(), &now_state, sizeof(StateData));
+
+        messages.push_back(state_message);
 
         const esp_err_t result = peer_link_send(TO_PEER_ID, messages);
 

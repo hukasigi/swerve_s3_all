@@ -40,10 +40,10 @@ class Steering {
             const int16_t current_turns = encoder->turns();
 
             if (current_turns >= STEER_TURN_LIMIT) {
-                twist_target_turns = current_turns - 1;
+                twist_target_turns = 0;
                 twist_release      = true;
             } else if (current_turns <= -STEER_TURN_LIMIT) {
-                twist_target_turns = current_turns + 1;
+                twist_target_turns = 0;
                 twist_release      = true;
             } else {
                 twist_release = false;
