@@ -45,6 +45,11 @@ struct TargetCommand {
         uint32_t        received_ms;
 };
 
+struct BodyVelocity {
+        double vx;
+        double vy;
+};
+
 using pin_t = uint8_t;
 using ch_t  = uint8_t;
 
