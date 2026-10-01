@@ -176,7 +176,9 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
         const double speed = wheel_speed[i] * scale;
 
         swerve_drives[i]->set_target_mm_s(wheel_angle[i], speed);
+        // Serial.printf("%f wheel_angle%d ", wheel_angle[i], i);
     }
+    // Serial.println();
 }
 
 void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) {
@@ -378,15 +380,16 @@ void control_loop_task(void* args) {
         if (millis() - last_print >= 200) {
             last_print = millis();
 
-            //     Serial.printf("target:(%d, %d) pos:(%d, %d) dist:%.1f "
-            //                   "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
-            //                   target_status.x, target_status.y, now_status.x, now_status.y, distance, now_vel_deg.x,
-            //                   now_vel_deg.y, ref_speed.x, ref_speed.y, body_vx, body_vy);
+            // Serial.printf("target:(%d, %d) pos:(%d, %d) dist:%.1f "
+            //               "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
+            //               target_pos.x, target_pos.y, n, now_status.y, distance, now_vel_deg.x, now_vel_deg.y,
+            //               ref_speed.x, ref_speed.y, body_vx, body_vy);
+            Serial.printf("target:(%d, %d,%d)\n", target_pos.x, target_pos.y, target_pos.deg);
             // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d  steer_deg%f  steer_deg%f  steer_deg%f\n",
             //               steering_1.get_turns(), steering_2.get_turns(), steering_3.get_turns(),
             //               steering_1.get_current_degree(), steering_2.get_current_degree(), steering_3.get_current_degree());
-            Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
-                          steering_2.get_turns(), steering_3.get_turns());
+            // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
+            //               steering_2.get_turns(), steering_3.get_turns());
         }
         if (now_state.gamepad_used) {
             handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
@@ -395,8 +398,8 @@ void control_loop_task(void* args) {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
 
-        can.update();
-        can_send();
+        // can.update();
+        // can_send();
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
