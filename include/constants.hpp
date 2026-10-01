@@ -78,6 +78,9 @@ const double OFFSET_DEG_3              = 42.75;
 const pin_t       CAN_CS_PIN  = 9; // 実際の配線に合わせて変更
 constexpr uint8_t CAN_INT_PIN = -1;
 
+const pin_t TX_PIN = 19;
+const pin_t RX_PIN = 20;
+
 constexpr uint8_t SPI_SCK_PIN  = 7;
 constexpr uint8_t SPI_MISO_PIN = 15;
 constexpr uint8_t SPI_MOSI_PIN = 16;
@@ -190,3 +193,5 @@ constexpr double ANGLE_TOLERANCE_DEG   = 1.0;
 // constexpr uint8_t POSITION_MESSAGE_TYPE = static_cast<uint8_t>(MessageType::RobotState);
 
 constexpr uint32_t GAMEPAD_TIMEOUT_MS = 250;
+
+constexpr uint32_t ORDER_CAN_ID = 0x31;

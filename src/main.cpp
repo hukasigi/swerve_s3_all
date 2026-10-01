@@ -2,6 +2,7 @@
 #include "IncrementalPid.h"
 #include "Pid.h"
 #include "constants.hpp"
+#include "esp_can.hpp"
 #include "localization.hpp"
 #include "message.h"
 #include "nnct/interfaces/interfaces.hpp"
@@ -67,12 +68,14 @@ Odometry odometry(enc_1, enc_2, enc_3);
 TabletData_Pos  now_pos;
 TabletData_Pos  target_pos;
 StateData       now_state;
-TabletOrder     order_data{};
+TabletOrder     tablet_order{};
 x_y_theta_deg_s ref_speed;
 
 x_y_theta_deg_s now_vel_deg;
 
 GamepadData received_gamepad_data{};
+
+CanDriver esp_can;
 
 volatile bool     gamepad_data_received   = false;
 volatile uint32_t last_gamepad_receive_ms = 0;
@@ -243,6 +246,17 @@ bool initialize_swerve_drives() {
     return true;
 }
 
+void send_tablet_order_data() {
+    static_assert(sizeof(TabletOrder) <= 8, "TabletOrder is too large for Classic CAN");
+
+    uint8_t data[8] = {};
+    memcpy(data, &tablet_order, sizeof(TabletOrder));
+
+    if (!esp_can.sendStandard(ORDER_CAN_ID, data, static_cast<uint8_t>(sizeof(TabletOrder)))) {
+        Serial.println("TabletOrder CAN send failed");
+    }
+}
+
 void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
     for (const Message& message : messages) {
         if (message.type == static_cast<uint8_t>(MessageType::TabletPos)) {
@@ -269,7 +283,7 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
                 continue;
             }
 
-            memcpy(&order_data, message.data.data(), sizeof(TabletOrder));
+            memcpy(&tablet_order, message.data.data(), sizeof(TabletOrder));
         }
     }
 }
@@ -301,8 +315,8 @@ void control_loop_task(void* args) {
         now_pos.deg = current_position.deg;
 
         // Gamepad制御との切り替え時に、現在位置へ目標を更新
-        if (order_data.gamepad_use != now_state.gamepad_used) {
-            now_state.gamepad_used = order_data.gamepad_use;
+        if (tablet_order.gamepad_use != now_state.gamepad_used) {
+            now_state.gamepad_used = tablet_order.gamepad_use;
 
             target_pos.x   = now_pos.x;
             target_pos.y   = now_pos.y;
@@ -384,12 +398,15 @@ void control_loop_task(void* args) {
             //               "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
             //               target_pos.x, target_pos.y, n, now_status.y, distance, now_vel_deg.x, now_vel_deg.y,
             //               ref_speed.x, ref_speed.y, body_vx, body_vy);
-            Serial.printf("target:(%d, %d,%d)\n", target_pos.x, target_pos.y, target_pos.deg);
+            // Serial.printf("target:(%d, %d,%d)\n", target_pos.x, target_pos.y, target_pos.deg);
             // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d  steer_deg%f  steer_deg%f  steer_deg%f\n",
             //               steering_1.get_turns(), steering_2.get_turns(), steering_3.get_turns(),
             //               steering_1.get_current_degree(), steering_2.get_current_degree(), steering_3.get_current_degree());
             // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
             //               steering_2.get_turns(), steering_3.get_turns());
+            Serial.printf("order: gamepad=%d load=%d reload=%d finish=%d launch=%d pos=%u acc=%u\n", tablet_order.gamepad_use,
+                          tablet_order.load_belt, tablet_order.reload_belt, tablet_order.reload_finish_belt,
+                          tablet_order.launch_belt, tablet_order.launch_pos_belt, tablet_order.acc_pos_belt);
         }
         if (now_state.gamepad_used) {
             handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
@@ -398,8 +415,8 @@ void control_loop_task(void* args) {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
 
-        // can.update();
-        // can_send();
+        can.update();
+        can_send();
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
@@ -419,6 +436,9 @@ void setup() {
     Serial.println("SPI initialized");
 
     can.begin();
+    if (esp_can.begin(1000E3, TX_PIN, RX_PIN)) {
+        printf("OK\r\n");
+    }
     odometry.begin();
     Serial.println("odometry initialized");
 
@@ -452,6 +472,14 @@ void loop() {
     //     Serial.printf("enc1:%lld enc2:%lld enc3:%lld\n", static_cast<long long>(enc_1.getCount()),
     //                   static_cast<long long>(enc_2.getCount()), static_cast<long long>(enc_3.getCount()));
     // }
+
+    static uint32_t last_order_send_ms = 0;
+    const uint32_t  now_ms             = millis();
+
+    if (now_ms - last_order_send_ms >= 100) {
+        last_order_send_ms = now_ms;
+        send_tablet_order_data();
+    }
 
     if (peer_link_is_peer_exist(TO_PEER_ID)) {
         std::vector<Message> messages;
