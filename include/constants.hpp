@@ -78,8 +78,8 @@ const double OFFSET_DEG_3              = 42.75;
 const pin_t       CAN_CS_PIN  = 9; // 実際の配線に合わせて変更
 constexpr uint8_t CAN_INT_PIN = -1;
 
-const pin_t TX_PIN = 19;
-const pin_t RX_PIN = 20;
+const pin_t TX_PIN = 13;
+const pin_t RX_PIN = 14;
 
 constexpr uint8_t SPI_SCK_PIN  = 7;
 constexpr uint8_t SPI_MISO_PIN = 15;
@@ -88,7 +88,7 @@ constexpr uint8_t SPI_MOSI_PIN = 16;
 const size_t NUM_SWERVE_MODULES = 3;
 
 // ステア制御パラメータ
-const int16_t STEER_MOTOR_POWER_LIMIT = 255.;
+const int16_t STEER_MOTOR_POWER_LIMIT = 250.;
 const int16_t STEER_INTEGRAL_LIMIT    = 10;
 const int16_t RANGE                   = 360;
 
@@ -106,7 +106,8 @@ constexpr double ROTATION_DEADZONE_DEG_S   = 1.0;
 
 // PIDパラメータ
 const struct PidParam STEERING_PID_PARAM = {.p_gain = 25., .i_gain = 0.0, .d_gain = 0.0};
-const struct PidParam DRIVE_PID_PARAM    = {.p_gain = 0.5, .i_gain = 0.0, .d_gain = 0.0};
+// const struct PidParam STEERING_PID_PARAM = {.p_gain = 0.1, .i_gain = 0.0, .d_gain = 0.0};
+const struct PidParam DRIVE_PID_PARAM = {.p_gain = 0.5, .i_gain = 0.0, .d_gain = 0.0};
 
 // FreeRTOS
 constexpr uint32_t CONTROL_LOOP_TASK_STACK_SIZE = 8192;
@@ -194,4 +195,4 @@ constexpr double ANGLE_TOLERANCE_DEG   = 1.0;
 
 constexpr uint32_t GAMEPAD_TIMEOUT_MS = 250;
 
-constexpr uint32_t ORDER_CAN_ID = 0x31;
+constexpr uint32_t BELT_CAN_ID = 0x31;
