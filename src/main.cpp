@@ -67,8 +67,9 @@ Odometry odometry(enc_1, enc_2, enc_3);
 
 TabletData_Pos  now_pos;
 TabletData_Pos  target_pos;
-StateData       now_state;
 x_y_theta_deg_s ref_speed;
+
+StateData now_state;
 
 x_y_theta_deg_s now_vel_deg;
 
@@ -249,6 +250,22 @@ void sendCommand(uint32_t id, uint8_t command) {
     ESP32Can.writeFrame(frame, 10);
 }
 
+void sendCommand(uint32_t id, uint16_t command) {
+    CanFrame frame = {};
+
+    frame.identifier       = id;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+
+    Serial.println(command);
+
+    // Big Endian
+    frame.data[0] = static_cast<uint8_t>((command >> 8) & 0xFF); // 上位バイト
+    frame.data[1] = static_cast<uint8_t>(command & 0xFF);        // 下位バイト
+
+    ESP32Can.writeFrame(frame, 10);
+}
+
 void update_swerve_drives() {
     for (size_t i = 0; i < NUM_SWERVE_MODULES; i++) {
         swerve_drives[i]->update(CONTROL_CYCLE_S);
@@ -271,42 +288,32 @@ bool initialize_swerve_drives() {
 
     return true;
 }
-void update_now_state_from_can_belt() {
-    now_state.load_belt          = can_belt.load_belt;
-    now_state.reload_belt        = can_belt.reload_belt;
-    now_state.reload_finish_belt = can_belt.reload_finish_belt;
-    now_state.launch_belt        = can_belt.launch_belt;
-
-    // BeltDataのlaunch_elevation_beltをStateDataのlaunch_pos_beltへ代入
-    now_state.launch_pos_belt = can_belt.launch_elevation_belt;
-    now_state.acc_pos_belt    = can_belt.acc_pos_belt;
-}
 
 void can_send_belt_data() {
 
     if (can_belt.load_belt) {
-        sendCommand(CAN_CMD_LOAD_BELT, 0);
+        sendCommand(CAN_CMD_LOAD_BELT);
         can_belt.load_belt = false;
     }
 
     if (can_belt.reload_belt) {
-        sendCommand(CAN_CMD_RELOAD_BELT, 0);
+        sendCommand(CAN_CMD_RELOAD_BELT);
         can_belt.reload_belt = false;
     }
 
     if (can_belt.reload_finish_belt) {
-        sendCommand(CAN_CMD_RELOAD_FINISH_BELT, 0);
+        sendCommand(CAN_CMD_RELOAD_FINISH_BELT);
         can_belt.reload_finish_belt = false;
     }
 
-    if (can_belt.launch_belt) {
-        sendCommand(CAN_CMD_LAUNCH_BELT, 0);
-        can_belt.launch_belt = false;
+    if (can_belt.launch) {
+        sendCommand(CAN_CMD_LAUNCH_BELT, can_belt.acc);
+        can_belt.launch = false;
     }
 
-    sendCommand(CAN_CMD_LAUNCH_ELEVATION_BELT, can_belt.launch_elevation_belt);
-
-    sendCommand(CAN_CMD_ACC_POS_BELT, can_belt.acc_pos_belt);
+    if (can_belt.elevation_change) {
+        sendCommand(CAN_CMD_LAUNCH_ELEVATION_BELT, can_belt.elevation_pos);
+    }
 }
 
 void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
@@ -314,6 +321,7 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 
     for (const Message& message : messages) {
         switch (static_cast<MessageType>(message.type)) {
+            // Serial.println(message.type);
         case MessageType::Position:
             if (message.data.size() != sizeof(TabletData_Pos)) {
                 Serial.println("invalid target data");
@@ -337,42 +345,58 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 
         case MessageType::TabletUse: gamepad_use = false; break;
 
-        case MessageType::LoadBelt:
-            can_belt.load_belt  = true;
-            now_state.load_belt = true;
-            can_order_received  = true;
-            break;
-
-        case MessageType::ReloadBelt:
-            can_belt.reload_belt  = true;
-            now_state.reload_belt = true;
-            can_order_received    = true;
-            break;
-
-        case MessageType::ReloadFinishBelt:
-            can_belt.reload_finish_belt  = true;
-            now_state.reload_finish_belt = true;
-            can_order_received           = true;
-            break;
-
-        case MessageType::LaunchBelt:
-            can_belt.launch_belt  = true;
-            now_state.launch_belt = true;
-            can_order_received    = true;
-            break;
-
-        case MessageType::LaunchStatus:
-            if (message.data.size() != sizeof(BeltElevationAccData)) {
-                Serial.println("invalid LaunchStatus data");
-                break;
-            }
-
-            memcpy(&can_belt.launch_elevation_belt, message.data.data(), sizeof(can_belt.launch_elevation_belt));
-
-            memcpy(&can_belt.acc_pos_belt, message.data.data() + sizeof(can_belt.launch_elevation_belt),
-                   sizeof(can_belt.acc_pos_belt));
-
+        case MessageType::BeltLoad:
+            can_belt.load_belt = true;
             can_order_received = true;
+            break;
+
+        case MessageType::BeltReload:
+            can_belt.reload_belt = true;
+            can_order_received   = true;
+            break;
+
+        case MessageType::BeltReloadFinish:
+            can_belt.reload_finish_belt = true;
+            can_order_received          = true;
+            break;
+
+        case MessageType::BeltBucket_High:
+            can_belt.elevation_pos    = 2;
+            can_belt.elevation_change = true;
+            can_order_received        = true;
+
+            break;
+        case MessageType::BeltBucket_Middle:
+            can_belt.elevation_pos    = 2;
+            can_belt.elevation_change = true;
+            can_order_received        = true;
+
+            break;
+        case MessageType::BeltBucket_Low:
+            can_belt.elevation_pos    = 2;
+            can_belt.elevation_change = true;
+            can_order_received        = true;
+
+            break;
+        case MessageType::BeltDesk:
+            can_belt.elevation_pos    = 3;
+            can_belt.elevation_change = true;
+            can_order_received        = true;
+
+            break;
+        case MessageType::BeltFlag:
+            can_belt.elevation_pos    = 1;
+            can_belt.elevation_change = true;
+            can_order_received        = true;
+
+            break;
+
+        case MessageType::BeltLaunch:
+            can_belt.launch    = true;
+            can_order_received = true;
+
+            memcpy(&can_belt.acc, message.data.data(), sizeof(can_belt.acc));
+
             break;
 
         default: Serial.printf("unknown message type: 0x%02X\n", message.type); break;
@@ -490,15 +514,16 @@ void control_loop_task(void* args) {
             //               "now_v:(%.1f, %.1f) ref_v:(%.1f, %.1f) body:(%.1f, %.1f)\n",
             //               target_pos.x, target_pos.y, n, now_status.y, distance, now_vel_deg.x, now_vel_deg.y,
             //               ref_speed.x, ref_speed.y, body_vx, body_vy);
-            Serial.printf("target:(%d, %d,%d)\n", target_pos.x, target_pos.y, target_pos.deg);
-            // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d  steer_deg%f  steer_deg%f  steer_deg%f\n",
+            // Serial.printf("target:(%d, %d,%d)\r\n", target_pos.x, target_pos.y, target_pos.deg);
+            // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d  steer_deg%f  steer_deg%f steer_deg%f\n",
             //               steering_1.get_turns(), steering_2.get_turns(), steering_3.get_turns(),
-            //               steering_1.get_current_degree(), steering_2.get_current_degree(), steering_3.get_current_degree());
+            //               steering_1.get_current_degree(), steering_2.get_current_degree(),
+            //               steering_3.get_current_degree());
             // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
             //               steering_2.get_turns(), steering_3.get_turns());
             // Serial.printf("order: gamepad=%d load=%d reload=%d finish=%d launch=%d pos=%u acc=%u\n", gamepad_use,
-            //               can_belt.load_belt, can_belt.reload_belt, can_belt.reload_finish_belt, can_belt.launch_belt,
-            //               can_belt.launch_elevation_belt, can_belt.acc_pos_belt);
+            //               can_belt.load_belt, can_belt.reload_belt, can_belt.reload_finish_belt, can_belt.launch,
+            //               can_belt.elevation_pos, can_belt.acc);
         }
         if (now_state.gamepad_used) {
             handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
@@ -507,8 +532,9 @@ void control_loop_task(void* args) {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
 
-        // can.update();
-        // can_send();
+        can.update();
+
+        can_send();
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
@@ -572,8 +598,6 @@ void loop() {
         Serial.printf("can_order");
         can_order_received = false;
         can_send_belt_data();
-
-        update_now_state_from_can_belt();
     }
     if (peer_link_is_peer_exist(TABLET_ESP_ID)) {
         std::vector<Message> messages;

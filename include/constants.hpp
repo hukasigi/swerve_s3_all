@@ -153,7 +153,7 @@ constexpr double COUNTS_PER_MM = (ENCODER_RESOLUTION * GEAR_RATIO) / (M_PI * OD_
 
 const double SPEED_EPS = 1e-3; // 1 mm/s 程度のノイズは角度更新を行わない
 
-constexpr double ANGLE_DEAD_ZONE_DEG = 0.1;
+constexpr double ANGLE_DEAD_ZONE_DEG = 1.0;
 
 // TODO:実機の車輪位置に合わせて変更してください
 // x: 前後方向、y: 左右方向
