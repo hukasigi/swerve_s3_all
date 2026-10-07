@@ -75,9 +75,11 @@ x_y_theta_deg_s now_vel_deg;
 
 GamepadData received_gamepad_data{};
 
-BeltData can_belt;
+BeltData   can_belt;
+RollerData can_roller;
 
-volatile bool can_order_received = false;
+volatile bool belt_order_received   = false;
+volatile bool roller_order_received = false;
 
 volatile bool     gamepad_data_received   = false;
 volatile uint32_t last_gamepad_receive_ms = 0;
@@ -315,13 +317,29 @@ void can_send_belt_data() {
         sendCommand(CAN_CMD_LAUNCH_ELEVATION_BELT, can_belt.elevation_pos);
     }
 }
+void can_send_roller_data() {
 
+    if (can_roller.stop) {
+        sendCommand(CAN_CMD_STOP_ROLLER);
+    }
+    if (can_roller.acc_start) {
+        sendCommand(CAN_CMD_LAUNCH_START);
+        can_roller.acc_start = false;
+    }
+    if (can_roller.launch) {
+        sendCommand(CAN_CMD_LAUNCH_ROLLER);
+        can_roller.launch = false;
+    }
+}
 void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& messages) {
     (void)peer_id;
 
     for (const Message& message : messages) {
         switch (static_cast<MessageType>(message.type)) {
             // Serial.println(message.type);
+
+        case MessageType::Stop: break;
+
         case MessageType::Position:
             if (message.data.size() != sizeof(TabletData_Pos)) {
                 Serial.println("invalid target data");
@@ -346,57 +364,72 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
         case MessageType::TabletUse: gamepad_use = false; break;
 
         case MessageType::BeltLoad:
-            can_belt.load_belt = true;
-            can_order_received = true;
+            can_belt.load_belt  = true;
+            belt_order_received = true;
             break;
 
         case MessageType::BeltReload:
             can_belt.reload_belt = true;
-            can_order_received   = true;
+            belt_order_received  = true;
             break;
 
         case MessageType::BeltReloadFinish:
             can_belt.reload_finish_belt = true;
-            can_order_received          = true;
+            belt_order_received         = true;
             break;
 
         case MessageType::BeltBucket_High:
             can_belt.elevation_pos    = 2;
             can_belt.elevation_change = true;
-            can_order_received        = true;
+            belt_order_received       = true;
 
             break;
         case MessageType::BeltBucket_Middle:
             can_belt.elevation_pos    = 2;
             can_belt.elevation_change = true;
-            can_order_received        = true;
+            belt_order_received       = true;
 
             break;
         case MessageType::BeltBucket_Low:
             can_belt.elevation_pos    = 2;
             can_belt.elevation_change = true;
-            can_order_received        = true;
+            belt_order_received       = true;
 
             break;
         case MessageType::BeltDesk:
             can_belt.elevation_pos    = 3;
             can_belt.elevation_change = true;
-            can_order_received        = true;
+            belt_order_received       = true;
 
             break;
         case MessageType::BeltFlag:
             can_belt.elevation_pos    = 1;
             can_belt.elevation_change = true;
-            can_order_received        = true;
+            belt_order_received       = true;
 
             break;
 
         case MessageType::BeltLaunch:
-            can_belt.launch    = true;
-            can_order_received = true;
+            can_belt.launch     = true;
+            belt_order_received = true;
 
             memcpy(&can_belt.acc, message.data.data(), sizeof(can_belt.acc));
 
+            break;
+
+        case MessageType::RollerStart:
+            can_roller.acc_start  = true;
+            roller_order_received = true;
+            break;
+
+        case MessageType::RollerLaunch:
+            can_roller.launch     = true;
+            roller_order_received = true;
+            break;
+
+        case MessageType::RollerStop:
+            can_roller.stop       = true;
+            roller_order_received = true;
             break;
 
         default: Serial.printf("unknown message type: 0x%02X\n", message.type); break;
@@ -521,6 +554,8 @@ void control_loop_task(void* args) {
             //               steering_3.get_current_degree());
             // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
             //               steering_2.get_turns(), steering_3.get_turns());
+            Serial.printf("Gamepad received: x=%d y=%d\n", received_gamepad_data.joystick_left.x,
+                          received_gamepad_data.joystick_left.y);
             // Serial.printf("order: gamepad=%d load=%d reload=%d finish=%d launch=%d pos=%u acc=%u\n", gamepad_use,
             //               can_belt.load_belt, can_belt.reload_belt, can_belt.reload_finish_belt, can_belt.launch,
             //               can_belt.elevation_pos, can_belt.acc);
@@ -532,9 +567,9 @@ void control_loop_task(void* args) {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
 
-        can.update();
+        // can.update();
 
-        can_send();
+        // can_send();
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
@@ -586,7 +621,7 @@ void setup() {
                 &control_loop_task_handle);
 
     Serial.printf("can_order");
-    can_order_received = false;
+    belt_order_received = false;
     can_send_belt_data();
 
     Serial.println("setup complete");
@@ -594,10 +629,15 @@ void setup() {
 
 void loop() {
 
-    if (can_order_received) {
+    if (belt_order_received) {
         Serial.printf("can_order");
-        can_order_received = false;
+        belt_order_received = false;
         can_send_belt_data();
+    }
+    if (roller_order_received) {
+        Serial.printf("can_order");
+        roller_order_received = false;
+        can_send_roller_data();
     }
     if (peer_link_is_peer_exist(TABLET_ESP_ID)) {
         std::vector<Message> messages;
