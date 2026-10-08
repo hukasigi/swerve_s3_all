@@ -293,19 +293,24 @@ bool initialize_swerve_drives() {
 
 void can_send_belt_data() {
 
-    if (can_belt.load_belt) {
-        sendCommand(CAN_CMD_LOAD_BELT);
-        can_belt.load_belt = false;
+    if (can_belt.load_chamber) {
+        sendCommand(CAN_CMD_LOAD_CHAMBER);
+        can_belt.load_chamber = false;
     }
 
-    if (can_belt.reload_belt) {
-        sendCommand(CAN_CMD_RELOAD_BELT);
-        can_belt.reload_belt = false;
+    if (can_belt.unload_mag) {
+        sendCommand(CAN_CMD_UNLOAD_MAG);
+        can_belt.unload_mag = false;
     }
 
-    if (can_belt.reload_finish_belt) {
-        sendCommand(CAN_CMD_RELOAD_FINISH_BELT);
-        can_belt.reload_finish_belt = false;
+    if (can_belt.load_mag) {
+        sendCommand(CAN_CMD_LOAD_MAG);
+        can_belt.load_mag = false;
+    }
+
+    if (can_belt.unload_chamber) {
+        sendCommand(CAN_CMD_UNLOAD_CHAMBER);
+        can_belt.unload_chamber = false;
     }
 
     if (can_belt.launch) {
@@ -335,8 +340,8 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
     (void)peer_id;
 
     for (const Message& message : messages) {
+        Serial.println(message.type);
         switch (static_cast<MessageType>(message.type)) {
-            // Serial.println(message.type);
 
         case MessageType::Stop: break;
 
@@ -363,19 +368,24 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 
         case MessageType::TabletUse: gamepad_use = false; break;
 
-        case MessageType::BeltLoad:
-            can_belt.load_belt  = true;
+        case MessageType::LoadChamber:
+            can_belt.load_chamber = true;
+            belt_order_received   = true;
+            break;
+
+        case MessageType::UnloadMag:
+            can_belt.unload_mag = true;
             belt_order_received = true;
             break;
 
-        case MessageType::BeltReload:
-            can_belt.reload_belt = true;
-            belt_order_received  = true;
+        case MessageType::LoadMag:
+            can_belt.load_mag   = true;
+            belt_order_received = true;
             break;
 
-        case MessageType::BeltReloadFinish:
-            can_belt.reload_finish_belt = true;
-            belt_order_received         = true;
+        case MessageType::UnloadChanber:
+            can_belt.unload_chamber = true;
+            belt_order_received     = true;
             break;
 
         case MessageType::BeltBucket_High:
@@ -554,8 +564,8 @@ void control_loop_task(void* args) {
             //               steering_3.get_current_degree());
             // Serial.printf("steer1 turns = %d steer2 turns = %dsteer3 turns = %d \n", steering_1.get_turns(),
             //               steering_2.get_turns(), steering_3.get_turns());
-            Serial.printf("Gamepad received: x=%d y=%d\n", received_gamepad_data.joystick_left.x,
-                          received_gamepad_data.joystick_left.y);
+            // Serial.printf("Gamepad received: x=%d y=%d\n", received_gamepad_data.joystick_left.x,
+            //               received_gamepad_data.joystick_left.y);
             // Serial.printf("order: gamepad=%d load=%d reload=%d finish=%d launch=%d pos=%u acc=%u\n", gamepad_use,
             //               can_belt.load_belt, can_belt.reload_belt, can_belt.reload_finish_belt, can_belt.launch,
             //               can_belt.elevation_pos, can_belt.acc);
@@ -567,9 +577,9 @@ void control_loop_task(void* args) {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
 
-        // can.update();
+        can.update();
 
-        // can_send();
+        can_send();
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
@@ -623,6 +633,10 @@ void setup() {
     Serial.printf("can_order");
     belt_order_received = false;
     can_send_belt_data();
+
+    sendCommand(CAN_CMD_LOAD_CHAMBER);
+    delay(5000);
+    sendCommand(CAN_CMD_LAUNCH_BELT, can_belt.acc);
 
     Serial.println("setup complete");
 }
