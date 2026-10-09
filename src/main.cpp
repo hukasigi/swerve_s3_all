@@ -259,12 +259,15 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
     constexpr uint16_t ACTION_SELECT        = 1 << 8;
     constexpr uint16_t ACTION_ROLLER_LAUNCH = 1 << 9;
 
-    const bool l1     = gamepad.buttons.bits.shoulder_left;
-    const bool r1     = gamepad.buttons.bits.shoulder_right;
-    const bool enable = l1 && r1;
+    constexpr uint16_t ELEVATION_ACTIONS = ACTION_DPAD_UP | ACTION_DPAD_DOWN;
+
+    constexpr uint16_t START_SELECT_MASK = ACTION_START | ACTION_SELECT;
+
+    const bool enable = gamepad.buttons.bits.shoulder_left && gamepad.buttons.bits.shoulder_right;
 
     uint16_t actions = 0;
 
+    // 通常操作：L1 + R1を押している間だけ有効
     if (enable) {
         if (gamepad.buttons.bits.west) {
             actions |= ACTION_SQUARE;
@@ -287,27 +290,9 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         if (gamepad.dpad == Dpad::Left) {
             actions |= ACTION_DPAD_LEFT;
         }
-
-        constexpr uint16_t ELEVATION_ACTIONS  = ACTION_DPAD_UP | ACTION_DPAD_DOWN;
-        const uint16_t     previous_elevation = previous_actions & ELEVATION_ACTIONS;
-        const uint16_t     current_elevation  = actions & ELEVATION_ACTIONS;
-
-        // D-pad上下の状態が変化した場合
-        if (current_elevation != previous_elevation) {
-            // 離した時、または方向転換時に停止
-            if (previous_elevation != 0) {
-                sendCommand(CAN_CMD_ELEVATION_STOP);
-            }
-
-            // 押した時に動作開始
-            if (current_elevation & ACTION_DPAD_UP) {
-                sendCommand(CAN_CMD_ELEVATION_UP);
-            } else if (current_elevation & ACTION_DPAD_DOWN) {
-                sendCommand(CAN_CMD_ELEVATION_DOWN);
-            }
-        }
     }
 
+    // START / SELECTはL1 + R1に関係なく取得
     if (gamepad.buttons.bits.start) {
         actions |= ACTION_START;
     }
@@ -315,28 +300,47 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         actions |= ACTION_SELECT;
     }
 
-    const bool start_or_select = gamepad.buttons.bits.start || gamepad.buttons.bits.select;
-
-    if (start_or_select && ps4_data.buttons.bits.touchpad) {
+    // STARTまたはSELECTを押しながらタッチパッド
+    if ((actions & START_SELECT_MASK) != 0 && ps4_data.buttons.bits.touchpad) {
         actions |= ACTION_ROLLER_LAUNCH;
     }
 
+    // 前回から今回への変化を計算
     const uint16_t pressed = actions & ~previous_actions;
 
-    previous_actions = actions;
+    // 昇降操作：押下・離上・方向転換
+    const uint16_t previous_elevation = previous_actions & ELEVATION_ACTIONS;
 
+    const uint16_t current_elevation = actions & ELEVATION_ACTIONS;
+
+    if (current_elevation != previous_elevation) {
+        if (previous_elevation != 0) {
+            sendCommand(CAN_CMD_ELEVATION_STOP);
+        }
+
+        if (current_elevation & ACTION_DPAD_UP) {
+            sendCommand(CAN_CMD_ELEVATION_UP);
+        } else if (current_elevation & ACTION_DPAD_DOWN) {
+            sendCommand(CAN_CMD_ELEVATION_DOWN);
+        }
+    }
+
+    // ベルト操作
     if (pressed & ACTION_SQUARE) {
         can_belt.load_chamber = true;
         belt_order_received   = true;
     }
+
     if (pressed & ACTION_CROSS) {
         can_belt.unload_mag = true;
         belt_order_received = true;
     }
+
     if (pressed & ACTION_TRIANGLE) {
         can_belt.load_mag   = true;
         belt_order_received = true;
     }
+
     if (pressed & ACTION_TOUCHPAD) {
         can_belt.launch     = true;
         can_belt.acc        = 0;
@@ -348,28 +352,30 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         belt_order_received     = true;
     }
 
-    // START と SELECT の両方が押された瞬間にローラーをトグル
-    constexpr uint16_t START_SELECT_MASK = ACTION_START | ACTION_SELECT;
-    const bool         start_and_select_triggered =
-        ((actions & START_SELECT_MASK) == START_SELECT_MASK) && ((previous_actions & START_SELECT_MASK) != START_SELECT_MASK);
+    // START + SELECTの同時押しでローラーを切り替え
+    const bool start_select_triggered =
+        (actions & START_SELECT_MASK) == START_SELECT_MASK && (previous_actions & START_SELECT_MASK) != START_SELECT_MASK;
 
-    if (start_and_select_triggered) {
+    if (start_select_triggered) {
         roller_started = !roller_started;
 
         if (roller_started) {
-            can_roller.acc_start = true; // 0x21
+            can_roller.acc_start = true;
         } else {
-            can_roller.stop = true; // 0x20
+            can_roller.stop = true;
         }
 
         roller_order_received = true;
     }
 
-    // STARTまたはSELECTを押しながらタッチパッド
+    // STARTまたはSELECTを押しながらタッチパッドでローラー発射
     if (pressed & ACTION_ROLLER_LAUNCH) {
-        can_roller.launch     = true; // 0x22
+        can_roller.launch     = true;
         roller_order_received = true;
     }
+
+    // 前回の状態を最後に一度だけ更新
+    previous_actions = actions;
 }
 
 void can_receive() {
@@ -738,9 +744,9 @@ void control_loop_task(void* args) {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
 
-        // can.update();
+        can.update();
 
-        // can_send();
+        can_send();
 
         vTaskDelayUntil(&wake_time, pdMS_TO_TICKS(CONTROL_CYCLE_MS));
     }
@@ -834,6 +840,28 @@ void loop() {
         messages.push_back(state_message);
 
         const esp_err_t result = peer_link_send(TABLET_ESP_ID, messages);
+
+        if (now_state.roller_reach && peer_link_is_peer_exist(Gamepad_ESP_ID)) {
+            std::vector<Message> rumble_messages;
+
+            Message rumble_message;
+            rumble_message.type = static_cast<uint8_t>(MessageType::PS4SetRumble);
+            rumble_message.data.resize(sizeof(PS4RumbleData));
+
+            PS4RumbleData data{};
+            data.small_rumble = 0;
+            data.big_rumble   = 1;
+            data.duration     = 500; // 500 ms
+
+            memcpy(rumble_message.data.data(), &data, sizeof(data));
+            rumble_messages.push_back(rumble_message);
+
+            const esp_err_t rumble_result = peer_link_send(Gamepad_ESP_ID, rumble_messages);
+
+            if (rumble_result != ESP_OK) {
+                Serial.printf("rumble send error: %d\n", rumble_result);
+            }
+        }
 
         if (result != ESP_OK) {
             Serial.printf("send error: %d\n", result);
