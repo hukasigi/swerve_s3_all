@@ -78,7 +78,6 @@ PS4Data     received_ps4_data{};
 
 BeltData   can_belt;
 RollerData can_roller;
-CAN_CMD    can_cmd;
 
 volatile bool belt_order_received   = false;
 volatile bool roller_order_received = false;
@@ -200,20 +199,49 @@ void handle_controller_input(int x_vec, int y_vec, int8_t l_stick_x) {
     }
 
     // コントローラ入力をワールド座標系の速度として扱う
-    const double world_vx = static_cast<double>(x_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
-    const double world_vy = -static_cast<double>(y_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
-
-    // ワールド座標系 -> 車体座標系
-    const double theta = now_pos.deg * M_PI / 180.0;
-    const double c     = cos(theta);
-    const double s     = sin(theta);
-
-    const double body_vx = c * world_vx + s * world_vy;
-    const double body_vy = -s * world_vx + c * world_vy;
+    const double body_vx = static_cast<double>(x_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
+    const double body_vy = -static_cast<double>(y_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
 
     const double omega = static_cast<double>(l_stick_x) / STICK_MAX * MAX_ROTATE_SPEED_DEG_S;
 
     set_robot_velocity(body_vx, body_vy, omega);
+}
+
+void sendCommand(uint32_t id) {
+    CanFrame frame = {};
+
+    frame.identifier       = id;
+    frame.extd             = 0;
+    frame.data_length_code = 0;
+
+    ESP32Can.writeFrame(&frame);
+}
+void sendCommand(uint32_t id, uint8_t command) {
+    CanFrame frame = {};
+
+    frame.identifier       = id;
+    frame.extd             = 0;
+    frame.data_length_code = 1;
+
+    frame.data[0] = command;
+
+    ESP32Can.writeFrame(frame, 10);
+}
+
+void sendCommand(uint32_t id, uint16_t command) {
+    CanFrame frame = {};
+
+    frame.identifier       = id;
+    frame.extd             = 0;
+    frame.data_length_code = 2;
+
+    Serial.println(command);
+
+    // Big Endian
+    frame.data[0] = static_cast<uint8_t>((command >> 8) & 0xFF); // 上位バイト
+    frame.data[1] = static_cast<uint8_t>(command & 0xFF);        // 下位バイト
+
+    ESP32Can.writeFrame(frame, 10);
 }
 
 void gamepad(GamepadData gamepad, PS4Data ps4_data) {
@@ -259,7 +287,27 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         if (gamepad.dpad == Dpad::Left) {
             actions |= ACTION_DPAD_LEFT;
         }
+
+        constexpr uint16_t ELEVATION_ACTIONS  = ACTION_DPAD_UP | ACTION_DPAD_DOWN;
+        const uint16_t     previous_elevation = previous_actions & ELEVATION_ACTIONS;
+        const uint16_t     current_elevation  = actions & ELEVATION_ACTIONS;
+
+        // D-pad上下の状態が変化した場合
+        if (current_elevation != previous_elevation) {
+            // 離した時、または方向転換時に停止
+            if (previous_elevation != 0) {
+                sendCommand(CAN_CMD_ELEVATION_STOP);
+            }
+
+            // 押した時に動作開始
+            if (current_elevation & ACTION_DPAD_UP) {
+                sendCommand(CAN_CMD_ELEVATION_UP);
+            } else if (current_elevation & ACTION_DPAD_DOWN) {
+                sendCommand(CAN_CMD_ELEVATION_DOWN);
+            }
+        }
     }
+
     if (gamepad.buttons.bits.start) {
         actions |= ACTION_START;
     }
@@ -274,7 +322,8 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
     }
 
     const uint16_t pressed = actions & ~previous_actions;
-    previous_actions       = actions;
+
+    previous_actions = actions;
 
     if (pressed & ACTION_SQUARE) {
         can_belt.load_chamber = true;
@@ -293,31 +342,18 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         can_belt.acc        = 0;
         belt_order_received = true;
     }
-    if (pressed & ACTION_DPAD_UP) {
-        if (can_belt.elevation_pos > 1) {
-            --can_belt.elevation_pos;
-        }
-
-        can_belt.elevation_change = true;
-        belt_order_received       = true;
-    }
-
-    if (pressed & ACTION_DPAD_DOWN) {
-        if (can_belt.elevation_pos < 3) {
-            ++can_belt.elevation_pos;
-        }
-
-        can_belt.elevation_change = true;
-        belt_order_received       = true;
-    }
 
     if (pressed & ACTION_DPAD_LEFT) {
         can_belt.unload_chamber = true;
         belt_order_received     = true;
     }
 
-    // STARTまたはSELECTでローラーをトグル
-    if (pressed & (ACTION_START | ACTION_SELECT)) {
+    // START と SELECT の両方が押された瞬間にローラーをトグル
+    constexpr uint16_t START_SELECT_MASK = ACTION_START | ACTION_SELECT;
+    const bool         start_and_select_triggered =
+        ((actions & START_SELECT_MASK) == START_SELECT_MASK) && ((previous_actions & START_SELECT_MASK) != START_SELECT_MASK);
+
+    if (start_and_select_triggered) {
         roller_started = !roller_started;
 
         if (roller_started) {
@@ -334,42 +370,6 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         can_roller.launch     = true; // 0x22
         roller_order_received = true;
     }
-}
-void sendCommand(uint32_t id) {
-    CanFrame frame = {};
-
-    frame.identifier       = id;
-    frame.extd             = 0;
-    frame.data_length_code = 0;
-
-    ESP32Can.writeFrame(&frame);
-}
-void sendCommand(uint32_t id, uint8_t command) {
-    CanFrame frame = {};
-
-    frame.identifier       = id;
-    frame.extd             = 0;
-    frame.data_length_code = 1;
-
-    frame.data[0] = command;
-
-    ESP32Can.writeFrame(frame, 10);
-}
-
-void sendCommand(uint32_t id, uint16_t command) {
-    CanFrame frame = {};
-
-    frame.identifier       = id;
-    frame.extd             = 0;
-    frame.data_length_code = 2;
-
-    Serial.println(command);
-
-    // Big Endian
-    frame.data[0] = static_cast<uint8_t>((command >> 8) & 0xFF); // 上位バイト
-    frame.data[1] = static_cast<uint8_t>(command & 0xFF);        // 下位バイト
-
-    ESP32Can.writeFrame(frame, 10);
 }
 
 void can_receive() {
@@ -510,6 +510,25 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 
         case MessageType::TabletUse: gamepad_use = false; break;
 
+        case MessageType::ELEVATION_UP:
+        case MessageType::ELEVATION_DOWN: {
+            if (message.data.size() != sizeof(uint16_t)) {
+                Serial.println("invalid elevation duration");
+                break;
+            }
+
+            uint16_t duration_ms = 0;
+            memcpy(&duration_ms, message.data.data(), sizeof(duration_ms));
+
+            const uint32_t command = static_cast<MessageType>(message.type) == MessageType::ELEVATION_UP
+                                         ? CAN_CMD_ELEVATION_UP
+                                         : CAN_CMD_ELEVATION_DOWN;
+
+            // uint16_tのpayload分だけ動作させる
+            sendCommand(command, duration_ms);
+            break;
+        }
+
         case MessageType::LoadChamber:
             can_belt.load_chamber = true;
             belt_order_received   = true;
@@ -604,8 +623,6 @@ void control_loop_task(void* args) {
         memcpy(&gamepad_data, &received_gamepad_data, sizeof(GamepadData));
         memcpy(&ps4_data, &received_ps4_data, sizeof(PS4Data));
         portEXIT_CRITICAL(&gamepad_data_mux);
-
-        gamepad(gamepad_data, ps4_data);
 
         update_swerve_drives();
 
@@ -716,6 +733,7 @@ void control_loop_task(void* args) {
         }
         if (now_state.gamepad_used) {
             handle_controller_input(gamepad_data.joystick_right.x, gamepad_data.joystick_right.y, gamepad_data.joystick_left.x);
+            gamepad(gamepad_data, ps4_data);
         } else {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
