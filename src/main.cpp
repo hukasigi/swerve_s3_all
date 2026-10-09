@@ -807,6 +807,10 @@ void setup() {
 
 void loop() {
     can_receive();
+    static bool previous_roller_reach = false;
+    const bool  roller_reach_trigger  = now_state.roller_reach && !previous_roller_reach;
+
+    previous_roller_reach = now_state.roller_reach;
 
     static uint32_t last_print = 0;
 
@@ -841,7 +845,7 @@ void loop() {
 
         const esp_err_t result = peer_link_send(TABLET_ESP_ID, messages);
 
-        if (now_state.roller_reach && peer_link_is_peer_exist(Gamepad_ESP_ID)) {
+        if (roller_reach_trigger && peer_link_is_peer_exist(Gamepad_ESP_ID)) {
             std::vector<Message> rumble_messages;
 
             Message rumble_message;
@@ -851,7 +855,7 @@ void loop() {
             PS4RumbleData data{};
             data.small_rumble = 0;
             data.big_rumble   = 1;
-            data.duration     = 500; // 500 ms
+            data.duration     = 1000;
 
             memcpy(rumble_message.data.data(), &data, sizeof(data));
             rumble_messages.push_back(rumble_message);
