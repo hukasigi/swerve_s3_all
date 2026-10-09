@@ -78,6 +78,7 @@ PS4Data     received_ps4_data{};
 
 BeltData   can_belt;
 RollerData can_roller;
+CAN_CMD    can_cmd;
 
 volatile bool belt_order_received   = false;
 volatile bool roller_order_received = false;
@@ -234,7 +235,7 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
     const bool r1     = gamepad.buttons.bits.shoulder_right;
     const bool enable = l1 && r1;
 
-    uint8_t actions = 0;
+    uint16_t actions = 0;
 
     if (enable) {
         if (gamepad.buttons.bits.west) {
@@ -272,40 +273,8 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         actions |= ACTION_ROLLER_LAUNCH;
     }
 
-    const uint8_t pressed = actions & ~previous_actions;
-    previous_actions      = actions;
-
-    if (pressed & (1 << 0)) { // 0x01: SQUARE
-        can_belt.load_chamber = true;
-        belt_order_received   = true;
-    }
-    if (pressed & (1 << 1)) { // 0x02: CROSS
-        can_belt.unload_mag = true;
-        belt_order_received = true;
-    }
-    if (pressed & (1 << 2)) { // 0x03: TRIANGLE
-        can_belt.load_mag   = true;
-        belt_order_received = true;
-    }
-    if (pressed & (1 << 3)) { // 0x04: タッチパッド
-        can_belt.launch     = true;
-        can_belt.acc        = 0;
-        belt_order_received = true;
-    }
-    if (pressed & (1 << 4)) { // 0x11: UP
-        if (can_belt.elevation_pos < 3) can_belt.elevation_pos += 1;
-        can_belt.elevation_change = true;
-        belt_order_received       = true;
-    }
-    if (pressed & (1 << 5)) { // 0x11: DOWN
-        if (can_belt.elevation_pos > 0) can_belt.elevation_pos -= 1;
-        can_belt.elevation_change = true;
-        belt_order_received       = true;
-    }
-    if (pressed & (1 << 6)) { // 0x12: LEFT
-        can_belt.unload_chamber = true;
-        belt_order_received     = true;
-    }
+    const uint16_t pressed = actions & ~previous_actions;
+    previous_actions       = actions;
 
     if (pressed & ACTION_SQUARE) {
         can_belt.load_chamber = true;
@@ -325,15 +294,23 @@ void gamepad(GamepadData gamepad, PS4Data ps4_data) {
         belt_order_received = true;
     }
     if (pressed & ACTION_DPAD_UP) {
-        can_belt.elevation_pos    = 1;
+        if (can_belt.elevation_pos > 1) {
+            --can_belt.elevation_pos;
+        }
+
         can_belt.elevation_change = true;
         belt_order_received       = true;
     }
+
     if (pressed & ACTION_DPAD_DOWN) {
-        can_belt.elevation_pos    = 2;
+        if (can_belt.elevation_pos < 3) {
+            ++can_belt.elevation_pos;
+        }
+
         can_belt.elevation_change = true;
         belt_order_received       = true;
     }
+
     if (pressed & ACTION_DPAD_LEFT) {
         can_belt.unload_chamber = true;
         belt_order_received     = true;
@@ -488,10 +465,16 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
     (void)peer_id;
 
     for (const Message& message : messages) {
-        Serial.println(message.type);
+        // Serial.println(message.type);
         switch (static_cast<MessageType>(message.type)) {
 
-        case MessageType::Stop: break;
+        case MessageType::Stop: sendCommand(CAN_CMD_STOP); break;
+
+        case MessageType::Reboot:
+            sendCommand(CAN_RESET);
+            delay(100);
+            ESP.restart();
+            break;
 
         case MessageType::Position:
             if (message.data.size() != sizeof(TabletData_Pos)) {
@@ -747,6 +730,7 @@ void control_loop_task(void* args) {
 
 void setup() {
     Serial.begin(115200);
+    can_belt.elevation_pos = 1;
     delay(500);
     Serial.println("setup start");
 
@@ -799,6 +783,8 @@ void setup() {
 
 void loop() {
     can_receive();
+
+    static uint32_t last_print = 0;
 
     if (belt_order_received) {
         Serial.printf("can_order");

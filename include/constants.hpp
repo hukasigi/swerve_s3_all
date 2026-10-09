@@ -97,7 +97,7 @@ const int16_t DRIVE_MOTOR_POWER_LIMIT = 255.;
 const int16_t DRIVE_INTEGRAL_LIMIT    = 10.;
 
 // コントローラ
-const double MAGNITUDE_DEADZONE = 15.0;
+const double MAGNITUDE_DEADZONE = 50.0;
 const double CONTROL_CYCLE_MS   = 2.0;
 const double CONTROL_CYCLE_S    = CONTROL_CYCLE_MS / 1000.0;
 
