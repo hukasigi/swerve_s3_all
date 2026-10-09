@@ -74,6 +74,7 @@ StateData now_state;
 x_y_theta_deg_s now_vel_deg;
 
 GamepadData received_gamepad_data{};
+PS4Data     received_ps4_data{};
 
 BeltData   can_belt;
 RollerData can_roller;
@@ -186,26 +187,9 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
     // Serial.println();
 }
 
-void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) {
-    double magnitude = hypot((double)x_vec, (double)y_vec);
+void handle_controller_input(int x_vec, int y_vec, int8_t l_stick_x) {
 
-    if (magnitude <= MAGNITUDE_DEADZONE) {
-        stop_swerve_drives();
-        return;
-    }
-
-    double degree            = atan2((double)y_vec, (double)x_vec) * 180.0 / M_PI;
-    double drive_target_duty = drive_power;
-
-    for (size_t i = 0; i < NUM_SWERVE_MODULES; i++) {
-        swerve_drives[i]->set_target_duty(degree, drive_target_duty);
-    }
-}
-
-void handle_controller_input(int x_vec, int y_vec, uint8_t l2_value, uint8_t r2_value) {
-
-    constexpr double STICK_MAX   = 127.0;
-    constexpr double TRIGGER_MAX = 255.0;
+    constexpr double STICK_MAX = 127.0;
 
     double magnitude = hypot((double)x_vec, (double)y_vec);
 
@@ -226,10 +210,153 @@ void handle_controller_input(int x_vec, int y_vec, uint8_t l2_value, uint8_t r2_
     const double body_vx = c * world_vx + s * world_vy;
     const double body_vy = -s * world_vx + c * world_vy;
 
-    // R2 - L2：旋回
-    const double omega = (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATE_SPEED_DEG_S;
+    const double omega = static_cast<double>(l_stick_x) / STICK_MAX * MAX_ROTATE_SPEED_DEG_S;
 
     set_robot_velocity(body_vx, body_vy, omega);
+}
+
+void gamepad(GamepadData gamepad, PS4Data ps4_data) {
+    static uint16_t previous_actions = 0;
+    static bool     roller_started   = false;
+
+    constexpr uint16_t ACTION_SQUARE        = 1 << 0;
+    constexpr uint16_t ACTION_CROSS         = 1 << 1;
+    constexpr uint16_t ACTION_TRIANGLE      = 1 << 2;
+    constexpr uint16_t ACTION_TOUCHPAD      = 1 << 3;
+    constexpr uint16_t ACTION_DPAD_UP       = 1 << 4;
+    constexpr uint16_t ACTION_DPAD_DOWN     = 1 << 5;
+    constexpr uint16_t ACTION_DPAD_LEFT     = 1 << 6;
+    constexpr uint16_t ACTION_START         = 1 << 7;
+    constexpr uint16_t ACTION_SELECT        = 1 << 8;
+    constexpr uint16_t ACTION_ROLLER_LAUNCH = 1 << 9;
+
+    const bool l1     = gamepad.buttons.bits.shoulder_left;
+    const bool r1     = gamepad.buttons.bits.shoulder_right;
+    const bool enable = l1 && r1;
+
+    uint8_t actions = 0;
+
+    if (enable) {
+        if (gamepad.buttons.bits.west) {
+            actions |= ACTION_SQUARE;
+        }
+        if (gamepad.buttons.bits.south) {
+            actions |= ACTION_CROSS;
+        }
+        if (gamepad.buttons.bits.north) {
+            actions |= ACTION_TRIANGLE;
+        }
+        if (ps4_data.buttons.bits.touchpad) {
+            actions |= ACTION_TOUCHPAD;
+        }
+        if (gamepad.dpad == Dpad::Up) {
+            actions |= ACTION_DPAD_UP;
+        }
+        if (gamepad.dpad == Dpad::Down) {
+            actions |= ACTION_DPAD_DOWN;
+        }
+        if (gamepad.dpad == Dpad::Left) {
+            actions |= ACTION_DPAD_LEFT;
+        }
+    }
+    if (gamepad.buttons.bits.start) {
+        actions |= ACTION_START;
+    }
+    if (gamepad.buttons.bits.select) {
+        actions |= ACTION_SELECT;
+    }
+
+    const bool start_or_select = gamepad.buttons.bits.start || gamepad.buttons.bits.select;
+
+    if (start_or_select && ps4_data.buttons.bits.touchpad) {
+        actions |= ACTION_ROLLER_LAUNCH;
+    }
+
+    const uint8_t pressed = actions & ~previous_actions;
+    previous_actions      = actions;
+
+    if (pressed & (1 << 0)) { // 0x01: SQUARE
+        can_belt.load_chamber = true;
+        belt_order_received   = true;
+    }
+    if (pressed & (1 << 1)) { // 0x02: CROSS
+        can_belt.unload_mag = true;
+        belt_order_received = true;
+    }
+    if (pressed & (1 << 2)) { // 0x03: TRIANGLE
+        can_belt.load_mag   = true;
+        belt_order_received = true;
+    }
+    if (pressed & (1 << 3)) { // 0x04: タッチパッド
+        can_belt.launch     = true;
+        can_belt.acc        = 0;
+        belt_order_received = true;
+    }
+    if (pressed & (1 << 4)) { // 0x11: UP
+        if (can_belt.elevation_pos < 3) can_belt.elevation_pos += 1;
+        can_belt.elevation_change = true;
+        belt_order_received       = true;
+    }
+    if (pressed & (1 << 5)) { // 0x11: DOWN
+        if (can_belt.elevation_pos > 0) can_belt.elevation_pos -= 1;
+        can_belt.elevation_change = true;
+        belt_order_received       = true;
+    }
+    if (pressed & (1 << 6)) { // 0x12: LEFT
+        can_belt.unload_chamber = true;
+        belt_order_received     = true;
+    }
+
+    if (pressed & ACTION_SQUARE) {
+        can_belt.load_chamber = true;
+        belt_order_received   = true;
+    }
+    if (pressed & ACTION_CROSS) {
+        can_belt.unload_mag = true;
+        belt_order_received = true;
+    }
+    if (pressed & ACTION_TRIANGLE) {
+        can_belt.load_mag   = true;
+        belt_order_received = true;
+    }
+    if (pressed & ACTION_TOUCHPAD) {
+        can_belt.launch     = true;
+        can_belt.acc        = 0;
+        belt_order_received = true;
+    }
+    if (pressed & ACTION_DPAD_UP) {
+        can_belt.elevation_pos    = 1;
+        can_belt.elevation_change = true;
+        belt_order_received       = true;
+    }
+    if (pressed & ACTION_DPAD_DOWN) {
+        can_belt.elevation_pos    = 2;
+        can_belt.elevation_change = true;
+        belt_order_received       = true;
+    }
+    if (pressed & ACTION_DPAD_LEFT) {
+        can_belt.unload_chamber = true;
+        belt_order_received     = true;
+    }
+
+    // STARTまたはSELECTでローラーをトグル
+    if (pressed & (ACTION_START | ACTION_SELECT)) {
+        roller_started = !roller_started;
+
+        if (roller_started) {
+            can_roller.acc_start = true; // 0x21
+        } else {
+            can_roller.stop = true; // 0x20
+        }
+
+        roller_order_received = true;
+    }
+
+    // STARTまたはSELECTを押しながらタッチパッド
+    if (pressed & ACTION_ROLLER_LAUNCH) {
+        can_roller.launch     = true; // 0x22
+        roller_order_received = true;
+    }
 }
 void sendCommand(uint32_t id) {
     CanFrame frame = {};
@@ -266,6 +393,25 @@ void sendCommand(uint32_t id, uint16_t command) {
     frame.data[1] = static_cast<uint8_t>(command & 0xFF);        // 下位バイト
 
     ESP32Can.writeFrame(frame, 10);
+}
+
+void can_receive() {
+    CanFrame frame;
+
+    // 受信バッファにあるフレームをすべて処理
+    while (ESP32Can.readFrame(frame, 0)) {
+        // Serial.printf("CAN RX: ID=0x%03lX DLC=%d DATA=", static_cast<unsigned long>(frame.identifier),
+        // frame.data_length_code);
+
+        // for (uint8_t i = 0; i < frame.data_length_code && i < 8; ++i) {
+        //     Serial.printf("%02X ", frame.data[i]);
+        // }
+
+        now_state.roller_reach = false;
+        if (frame.identifier == 0x102) {
+            now_state.roller_reach = true;
+        }
+    }
 }
 
 void update_swerve_drives() {
@@ -320,12 +466,14 @@ void can_send_belt_data() {
 
     if (can_belt.elevation_change) {
         sendCommand(CAN_CMD_LAUNCH_ELEVATION_BELT, can_belt.elevation_pos);
+        can_belt.elevation_change = false;
     }
 }
 void can_send_roller_data() {
 
     if (can_roller.stop) {
         sendCommand(CAN_CMD_STOP_ROLLER);
+        can_roller.stop = false;
     }
     if (can_roller.acc_start) {
         sendCommand(CAN_CMD_LAUNCH_START);
@@ -362,6 +510,17 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 
             portENTER_CRITICAL(&gamepad_data_mux);
             memcpy(&received_gamepad_data, message.data.data(), sizeof(GamepadData));
+            portEXIT_CRITICAL(&gamepad_data_mux);
+            break;
+
+        case MessageType::PS4Data:
+            if (message.data.size() != sizeof(PS4Data)) {
+                Serial.println("invalid PS4 data");
+                break;
+            }
+
+            portENTER_CRITICAL(&gamepad_data_mux);
+            memcpy(&received_ps4_data, message.data.data(), sizeof(PS4Data));
             portEXIT_CRITICAL(&gamepad_data_mux);
             break;
         case MessageType::GamePadUse: gamepad_use = true; break;
@@ -456,12 +615,14 @@ void control_loop_task(void* args) {
         const double dt = CONTROL_CYCLE_MS / 1000.0;
 
         GamepadData gamepad_data{};
+        PS4Data     ps4_data{};
 
         portENTER_CRITICAL(&gamepad_data_mux);
-
         memcpy(&gamepad_data, &received_gamepad_data, sizeof(GamepadData));
-
+        memcpy(&ps4_data, &received_ps4_data, sizeof(PS4Data));
         portEXIT_CRITICAL(&gamepad_data_mux);
+
+        gamepad(gamepad_data, ps4_data);
 
         update_swerve_drives();
 
@@ -571,8 +732,7 @@ void control_loop_task(void* args) {
             //               can_belt.elevation_pos, can_belt.acc);
         }
         if (now_state.gamepad_used) {
-            handle_controller_input(gamepad_data.joystick_left.x, gamepad_data.joystick_left.y, gamepad_data.trigger_left,
-                                    gamepad_data.trigger_right);
+            handle_controller_input(gamepad_data.joystick_right.x, gamepad_data.joystick_right.y, gamepad_data.joystick_left.x);
         } else {
             set_robot_velocity(body_vx, body_vy, ref_speed.deg);
         }
@@ -634,14 +794,11 @@ void setup() {
     belt_order_received = false;
     can_send_belt_data();
 
-    sendCommand(CAN_CMD_LOAD_CHAMBER);
-    delay(5000);
-    sendCommand(CAN_CMD_LAUNCH_BELT, can_belt.acc);
-
     Serial.println("setup complete");
 }
 
 void loop() {
+    can_receive();
 
     if (belt_order_received) {
         Serial.printf("can_order");
