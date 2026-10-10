@@ -188,21 +188,27 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
 }
 
 void handle_controller_input(int x_vec, int y_vec, int8_t l_stick_x) {
-
     constexpr double STICK_MAX = 127.0;
 
-    double magnitude = hypot((double)x_vec, (double)y_vec);
+    const double magnitude = hypot(static_cast<double>(x_vec), static_cast<double>(y_vec));
 
     if (magnitude <= MAGNITUDE_DEADZONE) {
         x_vec = 0;
         y_vec = 0;
+    } else {
+        // デッドゾーン後を0～最大値へ再マッピング
+        const double remapped = std::min((magnitude - MAGNITUDE_DEADZONE) / (STICK_MAX - MAGNITUDE_DEADZONE), 1.0);
+
+        const double scale = remapped / magnitude;
+
+        x_vec = static_cast<int>(x_vec * scale);
+        y_vec = static_cast<int>(y_vec * scale);
     }
 
-    // コントローラ入力をワールド座標系の速度として扱う
     const double body_vx = static_cast<double>(x_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
     const double body_vy = -static_cast<double>(y_vec) / STICK_MAX * STICK_SHIFT_SPEED_MM_S;
 
-    const double omega = static_cast<double>(l_stick_x) / STICK_MAX * MAX_ROTATE_SPEED_DEG_S;
+    const double omega = static_cast<double>(-l_stick_x) / STICK_MAX * MAX_ROTATE_SPEED_DEG_S;
 
     set_robot_velocity(body_vx, body_vy, omega);
 }
@@ -476,11 +482,9 @@ void peer_link_recv_cb(const peer_id_t peer_id, const std::vector<Message>& mess
 
         case MessageType::Stop: sendCommand(CAN_CMD_STOP); break;
 
-        case MessageType::Reboot:
-            sendCommand(CAN_RESET);
-            delay(100);
-            ESP.restart();
-            break;
+        case MessageType::STM_RESET: sendCommand(CAN_RESET); break;
+
+        case MessageType::Reboot: ESP.restart(); break;
 
         case MessageType::Position:
             if (message.data.size() != sizeof(TabletData_Pos)) {

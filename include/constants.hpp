@@ -88,7 +88,7 @@ constexpr uint8_t SPI_MOSI_PIN = 16;
 const size_t NUM_SWERVE_MODULES = 3;
 
 // ステア制御パラメータ
-const int16_t STEER_MOTOR_POWER_LIMIT = 250.;
+const int16_t STEER_MOTOR_POWER_LIMIT = 128.;
 const int16_t STEER_INTEGRAL_LIMIT    = 10;
 const int16_t RANGE                   = 360;
 
@@ -175,9 +175,9 @@ constexpr double MIN_STOP_SPEED_MM_S        = 70.0;
 
 // ホイール物理最大速度（実機に合わせて調整）  482rpmなので2500mm/s
 constexpr double MAX_SHIFT_SPEED_MM_S   = 2400.0;
-constexpr double STICK_SHIFT_SPEED_MM_S = 1200.0;
+constexpr double STICK_SHIFT_SPEED_MM_S = 600.0;
 
-constexpr double MAX_ROTATE_SPEED_DEG_S = 500.0;
+constexpr double MAX_ROTATE_SPEED_DEG_S = 200.0;
 
 constexpr double MAX_SHIFT_ACCELERATION  = 2000.;
 constexpr double MAX_SHIFT_DECELERATION  = 1500.;
