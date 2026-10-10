@@ -845,32 +845,33 @@ void loop() {
 
         const esp_err_t result = peer_link_send(TABLET_ESP_ID, messages);
 
-        if (roller_reach_trigger && peer_link_is_peer_exist(Gamepad_ESP_ID)) {
-            std::vector<Message> rumble_messages;
-
-            Message rumble_message;
-            rumble_message.type = static_cast<uint8_t>(MessageType::PS4SetRumble);
-            rumble_message.data.resize(sizeof(PS4RumbleData));
-
-            PS4RumbleData data{};
-            data.small_rumble = 0;
-            data.big_rumble   = 1;
-            data.duration     = 1000;
-
-            memcpy(rumble_message.data.data(), &data, sizeof(data));
-            rumble_messages.push_back(rumble_message);
-
-            const esp_err_t rumble_result = peer_link_send(Gamepad_ESP_ID, rumble_messages);
-
-            if (rumble_result != ESP_OK) {
-                Serial.printf("rumble send error: %d\n", rumble_result);
-            }
-        }
-
         if (result != ESP_OK) {
             Serial.printf("send error: %d\n", result);
         }
     }
 
+    if (roller_reach_trigger && peer_link_is_peer_exist(Gamepad_ESP_ID)) {
+        // if (true) {
+        std::vector<Message> rumble_messages;
+
+        Message rumble_message;
+        rumble_message.type = static_cast<uint8_t>(MessageType::PS4SetRumble);
+        rumble_message.data.resize(sizeof(PS4RumbleData));
+
+        PS4RumbleData data{};
+        data.small_rumble = 0;
+        data.big_rumble   = 255;
+        data.duration     = 1000;
+
+        memcpy(rumble_message.data.data(), &data, sizeof(data));
+        rumble_messages.push_back(rumble_message);
+        Serial.println("send");
+
+        const esp_err_t rumble_result = peer_link_send(Gamepad_ESP_ID, rumble_messages);
+
+        if (rumble_result != ESP_OK) {
+            Serial.printf("rumble send error: %d\n", rumble_result);
+        }
+    }
     delay(LOOP_DELAY_MS);
 }
